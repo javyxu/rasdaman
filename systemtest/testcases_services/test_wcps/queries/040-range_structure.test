@@ -1,0 +1,8 @@
+for $c in ( test_rgb ) return encode(
+    $c[i(0:1), j(0:1)].red *
+     {
+        red: (unsigned char) 1;
+        green: (unsigned char) 2;
+        blue: (unsigned char) 3
+     },
+"image/png", "nodata=0")

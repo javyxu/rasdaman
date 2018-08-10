@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<CompoundCRS xmlns:gml='http://www.opengis.net/gml/3.2'
+   xmlns:epsg='urn:x-ogp:spec:schema-xsd:EPSG:0.1:dataset'
+   xmlns:xlink='http://www.w3.org/1999/xlink'
+   id='crs'  >
+   <metaDataProperty>
+      <epsg:CommonMetaData>
+         <epsg:type>compound</epsg:type>
+      </epsg:CommonMetaData>
+   </metaDataProperty>
+   <scope>not known</scope>
+   <name>WGS 84 / MSL depth</name>
+</CompoundCRS>

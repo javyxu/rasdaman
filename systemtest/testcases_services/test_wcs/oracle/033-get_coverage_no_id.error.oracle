@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ows:ExceptionReport version="2.0.1"
+    
+      >
+    <ows:Exception exceptionCode="InvalidRequest">
+        <ows:ExceptionText>A GetCoverage request must specify at least one coverageId.</ows:ExceptionText>
+    </ows:Exception>
+</ows:ExceptionReport>

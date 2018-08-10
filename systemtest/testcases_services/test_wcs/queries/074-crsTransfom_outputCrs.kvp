@@ -1,0 +1,7 @@
+service=WCS&
+version=2.0.1&
+request=GetCoverage&
+coverageId=test_eobstest&
+format=image/png&
+subset=t(127470)&
+outputCrs=http://localhost:8080/def/crs/EPSG/0/3857

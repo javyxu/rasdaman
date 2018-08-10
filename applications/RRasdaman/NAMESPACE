@@ -1,0 +1,48 @@
+import(rJava)
+importFrom(methods, setClass, setGeneric, setMethod, setValidity, setAs)
+
+exportClasses(
+    RasdamanObject,
+    RasdamanHandle,
+    RasdamanDriver,
+    RasdamanConnection,
+    RasdamanResult,
+    RasdamanArray,
+    RasdamanArrayHandle
+)
+
+exportMethods(
+    summary,
+    dbGetInfo,
+
+    dbListConnections,
+    dbConnect,
+
+    dbDisconnect,
+    dbCommit,
+    dbRollback,
+    dbExistsCollection,
+    dbListCollections,
+    dbSendQuery,
+    dbGetQuery,
+    dbListResults,
+    dbReadCollection,
+    dbInsertCollection,
+    dbUpdateCollection,
+    dbRemoveCollection,
+
+    getCell,
+    dbReadCollection,
+    dbInsertCollection,
+    dbUpdateCollection,
+    simplify,
+    dbFetch,
+    dim
+)
+
+export(
+    Rasdaman,
+    RasdamanArray,
+    CONN_READ_ONLY,
+    CONN_READ_WRITE
+)

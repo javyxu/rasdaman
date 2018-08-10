@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ows:ExceptionReport version="2.0.1"
+    
+      >
+    <ows:Exception exceptionCode="InvalidSubsetting">
+        <ows:ExceptionText>Invalid 'subsetting' with '127470.54166666666666666666666666666666666666666666666667:127470.5' for axis 't'.</ows:ExceptionText>
+    </ows:Exception>
+</ows:ExceptionReport>

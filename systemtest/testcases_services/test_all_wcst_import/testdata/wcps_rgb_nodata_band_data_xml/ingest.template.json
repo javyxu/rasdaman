@@ -1,0 +1,84 @@
+{
+  "config": {
+    "service_url": "PETASCOPE_URL",
+    "tmp_directory": "/tmp/",
+    "mock": false,
+    "automated": true,
+    "track_files": false
+  },
+  "input": {
+    "coverage_id": "test_rgb_nodata_band_data_xml",
+    "paths": [
+      "*.png"
+    ]
+  },
+  "recipe": {
+    "name": "general_coverage",
+    "options": {
+      "coverage": {
+        "crs": "OGC/0/Index2D",
+        "metadata": {
+          "type": "xml",
+          "global": {
+	    "description": "'This file has 3 different nodata values for bands and they could be fetched implicitly.'",
+            "resolution": "'1'"
+          },
+          "bands": {
+	      "red": {
+		  "metadata1": "metadata_red1",
+  		  "metadata2": "metadata_red2"
+               },
+	      "green": {
+		  "metadata3": "metadata_green3",
+  		  "metadata4": "metadata_green4"
+               }, 
+	      "blue": {
+		  "metadata5": "metadata_blue5"  		  
+               }
+           },
+	   "axes": {
+	      "i": {
+		   "metadata_i_1": "metadata_1",
+		   "metadata_i_2": "metadata_2"
+	       },
+              "j": {
+		   "metadata_j_1": "metadata_3"
+	      }
+           }
+        },
+        "slicer": {
+          "type": "gdal",
+          "bands": [
+            {
+              "identifier": "red",
+              "name": "red",
+	      "description": "${gdal:minY} + ${gdal:maxY}"
+	      
+            }, {
+              "identifier": "red",
+              "name": "green",
+	      "description": "${gdal:minX} + ${gdal:maxX}"
+            }, {
+              "identifier": "red",
+              "name": "blue",
+	      "description": "${gdal:maxX} + ${gdal:minX}"
+            }
+          ],
+          "axes": {
+            "j": {
+              "min": "${gdal:maxY}",
+              "max": "${gdal:minY}",
+              "resolution": "-1"
+            },
+            "i": {
+              "min": "${gdal:minX}",
+              "max": "${gdal:maxX}",
+              "resolution": "${gdal:resolutionX}"
+            }
+          }
+        }
+      },
+      "tiling": "ALIGNED [0:1023, 0:1023] TILE SIZE 4194304"
+    }
+  }
+}

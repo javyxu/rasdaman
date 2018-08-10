@@ -1,0 +1,4 @@
+for $c in (test_mr) return
+   encode(
+      count(trim($c, {i(30:31),j(30:31)}) > 0) * 2,
+   "text/csv")

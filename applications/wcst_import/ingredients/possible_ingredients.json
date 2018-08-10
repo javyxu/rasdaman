@@ -1,0 +1,164 @@
+{
+  "__comment__": [
+    "Each possible parameter for every recipe is commented in this file. As JSON does not support comments above",
+    "each filed, a __comment__ field is placed that explains the semantics of the field below it.",
+    "In some cases, a parameter might have different possible values (e.g. recipe). In this case, the field for the",
+    "parameter will be doubled.",
+    "This file is considered a developer documentation that gives an overview over all possible ingredients.",
+    "Refer to the user documentation at http://rasdaman.org or to the individual files for more documentation."
+  ],
+  "config": {
+    "__comment__": "The base url to the WCST service, i.e. not including ?service=WCS&acceptversion=2.0.0",
+    "service_url": "http://localhost:8080/rasdaman/ows",
+    "__comment__": "Temporary directory in which to create gml and data files, should be readable and writable by both rasdaman, petascope and current user",
+    "tmp_directory": "/tmp/",
+    "__comment__": "The crs resolver to use for generating the gml",
+    "crs_resolver": "http://opengis.net/def/",
+    "__comment__": "The default crs to be used for gdal files that do not have it",
+    "default_crs": "http://opengis.net/def/def/crs/OGC/0/Index2D",
+    "__comment__": "[OPTIONAL] If mock parameter is true then the wcst requests are printed to stdout and not executed",
+    "mock": false,
+    "__comment__": "[OPTIONAL] Set to true if no human input should be requested and everything should be completely automated",
+    "automated": false,
+    "__comment__": "[OPTIONAL] This parameter adds default null values for bands that *DO NOT* have a null value provided by the file itself. The value for this parameter should be an array containing the desired null value in rasdaman format for each band. E.g. for a coverage with 3 bands:",
+    "default_null_values": [
+      "9995:9999",
+      "-9, -10, -87",
+      "4"
+    ],
+    "__comment__": "[OPTIONAL] In case the files are exposed via a web-server and not locally, you can add the root url here, otherwise the default is listed below",
+    "url_root": "file://",
+    "__comment__": "[OPTIONAL] In some cases the resolution is small enough to affect the precision of the transformation from domain coordinates to grid coordinates. To allow for corrections that will make the import possible, set this parameter to true.",
+    "subset_correction": false,
+    "__comment__": "[OPTIONAL] If set to true, it will skip files that were not imported and move to the next ones.",
+    "skip": false,
+    "__comment__": "[OPTIONAL] If a WCST request fails it will be retried a number of times before an error is thrown",
+    "retry": true,
+    "__comment__": "[OPTIONAL] Number of retries to be attempted.",
+    "retries": 5,
+    "__comment__": "[OPTIONAL] The number of seconds to wait before retrying after an error. You can also specify a floating number to represent subdivisions of seconds.",
+    "retry_sleep": 1,
+    "__comment__": "[OPTIONAL] Limit the slices that are imported to the ones that fit in the bounding box below. Each subset in the bounding box should be of form {low:0,high:100} in the format of the axis.",
+    "slice_restriction": [
+      {
+        "low": 0,
+        "high": 36000
+      },
+      {
+        "low": 0,
+        "high": 18000
+      },
+      {
+        "low": "2012-02-09",
+        "high": "2012-12-09T14:20",
+        "type": "date"
+      }
+    ],
+    "__comment__" : "[OPTIONAL] The directory in which to store the resumer file. By default, it will be stored in the same folder as the ingredients file."
+    "resumer_dir_path" : "/var/geodata/resumer/",
+    "__comment__" : "[OPTIONAL] The number of slices to show in the description.",
+    "description_max_no_slices" : 42,
+    "__comment__" : "[OPTIONAL] Allow files to be tracked in order to not reimport files that were already ingested",
+    "track_files" : true
+  },
+  "input": {
+    "__comment__": "The id of the coverage. If it already exists, we will consider this operation an update",
+    "coverage_id": "MyCoverage",
+    "__comment__": "The input paths to take into consideration. A path can be a single file or a unix file regex.",
+    "paths": [
+      "/var/data/test_1.tif",
+      "/var/data/dir/*"
+    ]
+  },
+  "recipe": {
+    "__comment__": "The recipe name",
+    "name": "map_mosaic",
+    "__comment__": "A list of options required by the recipe",
+    "options": {
+      "__comment__": "[OPTIONAL]The tiling of the coverage in rasql format",
+      "tiling": "ALIGNED [0:1023, 0:1023] TILE SIZE 4194304",
+      "__comment__": "[OPTIONAL] If you want to import in wms as well set this variable to true",
+      "wms_import": true,
+      "__comment__": "[OPTIONAL] Specify the names of the bands, in cases the automatic inference (default: field_1, ...) is not good enough",
+      "band_names": [
+        "red",
+        "green",
+        "blue"
+      ]
+    }
+  },
+  "recipe": {
+    "__comment__": "This recipe should be used to extract a large coverage from an existing WCS service",
+    "name": "wcs_extract",
+    "options": {
+      "__comment__": "The coverage to be imported",
+      "coverage_id": "SomeOtherCoverage",
+      "__comment__": "The endpoint of the WCS where the coverage resides",
+      "wcs_endpoint": "http://example.org/rasdaman/ows",
+      "__comment__": "A partitioning scheme to be used. For each grid axis specify the maximum number of pixels that should be retrieved. The system uses this as a hint and can generate different partitioning schemes depending on the coverage structure",
+      "partitioning_scheme": [
+        4000,
+        4000,
+        1
+      ],
+      "__comment__": "[OPTIONAL]The tiling of the coverage in rasql format",
+      "tiling": "ALIGNED [0:3999, 0:3999, 0:4] TILE SIZE 64000000",
+      "__comment__": "[OPTIONAL] If you want to import in wms as well set this variable to true",
+      "wms_import": true
+    }
+  },
+  "recipe": {
+    "__comment__": "The recipe name",
+    "name": "time_series_regular",
+    "__comment__": "A list of options required by the recipe",
+    "options": {
+      "__comment__": "The origin of the timeseries",
+      "time_start": "2012-12-02T20:12:02",
+      "__comment__": "The datetime format of the parameter above. Auto will try to guess it, any other datetime format is accepted",
+      "time_format": "auto",
+      "__comment__": "The time crs to be used with the 2d crs to create a compound crs for the whole coverage",
+      "time_crs": "http://192.168.0.103:8080/def/crs/OGC/0/AnsiDate",
+      "__comment__": "The time step between two slices, expressed in days, hours, minutes and seconds",
+      "time_step": "2 days 10 minutes 3 seconds",
+      "__comment__": "[OPTIONAL]The tiling of the coverage in rasql format",
+      "tiling": "ALIGNED [0:999, 0:999, 0:2] TILE SIZE 3000000",
+      "__comment__": "[OPTIONAL] Specify the names of the bands, in cases the automatic inference (default: field_1, ...) is not good enough",
+      "band_names": [
+        "red",
+        "green",
+        "blue"
+      ]
+    }
+  },
+  "recipe": {
+    "__comment__": "The recipe name",
+    "name": "time_series_irregular",
+    "__comment__": "A list of options required by the recipe",
+    "options": {
+      "__comment__": "The time parameter describes to the recipe how to extract the datetime. Two options possible: metadata_tag OR filename",
+      "time_parameter": {
+        "metadata_tag": {
+          "__comment__": "The name of the tag in the gdal file, the default is the one below",
+          "tag_name": "TIFFTAG_DATETIME"
+        },
+        "filename": {
+          "__comment__": "The regex has to contain groups of tokens, separated by parentheses. The group parameter specifies which regex group to use for retrieving the time value",
+          "regex": "(.*)_(.*)_(.+?)_(.*)",
+          "group": "2"
+        },
+        "__comment__": "The format of the value of the time parameter: 'auto' will try to guess it",
+        "datetime_format": "YYYY:MM:DD HH:mm:ss"
+      },
+      "__comment__": "The time crs to be used with the 2d crs to create a compound crs for the whole coverage",
+      "time_crs": "http://kahlua.eecs.jacobs-university.de:8080/def/crs/OGC/0/AnsiDate",
+      "__comment__": "[OPTIONAL]The tiling of the coverage in rasql format",
+      "tiling": "ALIGNED [0:9, 0:999, 0:499] TILE SIZE 5000000",
+      "__comment__": "[OPTIONAL] Specify the names of the bands, in cases the automatic inference (default: field_1, ...) is not good enough",
+      "band_names": [
+        "red",
+        "green",
+        "blue"
+      ]
+    }
+  }
+}

@@ -1,0 +1,64 @@
+#!/bin/bash
+#
+# This file is part of rasdaman community.
+#
+# Rasdaman community is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Rasdaman community is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 Peter Baumann /
+# rasdaman GmbH.
+#
+# For more information please see <http://www.rasdaman.org>
+# or contact Peter Baumann via <baumann@rasdaman.com>.
+#
+# ------------------------------------------------------------------------------
+#
+# SYNOPSIS
+#	  test.conf
+# Description
+#	  Holds configuration for the systemtests. Test scripts include this conf file
+#   in order to get configuration parameters. Meaningful defaults are provided
+#   where possible, and parameters which absolutely need to be revised are
+#   marked with @revise.
+#
+################################################################################
+
+# ------------------------------------------------------------------------------
+# rasdaman connection details
+#
+export RASDB=RASBASE
+export RASMGR_PORT=7001
+export RASMGR_HOST=localhost
+export RASMGR_ADMIN_USER=rasadmin
+export RASMGR_ADMIN_PASSWD=rasadmin
+export RASLOGIN=rasadmin:d293a15562d3e70b6fdc5ee452eaed40
+
+export RMANHOME=@CMAKE_INSTALL_PREFIX@
+export RASMGR_CONF=$RMANHOME/etc/rasmgr.conf
+export ENABLE_JAVA=@ENABLE_JAVA@
+
+
+# ------------------------------------------------------------------------------
+# petascope connection details
+#
+export PETASCOPE_DB=petascopedb
+export PETASCOPE_PORT=8080
+export PETASCOPE_URL="http://localhost:$PETASCOPE_PORT/rasdaman/ows"
+export RASQL_SERVLET="http://localhost:$PETASCOPE_PORT/rasdaman/rasql"
+
+# ------------------------------------------------------------------------------
+# secore connection details
+#
+export SECORE_HOST=localhost
+export SECORE_PORT=8080
+export SECORE_URL="http://$SECORE_HOST:$SECORE_PORT/def"

@@ -1,0 +1,301 @@
+#!/bin/bash
+#
+# This file is part of rasdaman community.
+#
+# Rasdaman community is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Rasdaman community is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright 2003 - 2015 Peter Baumann / rasdaman GmbH.
+#
+# For more information please see <http://www.rasdaman.org>
+# or contact Peter Baumann via <baumann@rasdaman.com>.
+#
+# ------------------------------------------------------------------------------
+#
+# SYNOPSIS
+# ./update_db.sh
+#
+# Description
+#  Command-line utility for updating the rasdaman database RASBASE. The updating is
+#  done by importing all appropriate updateX.sql files to postgres. The script
+#  determines automatically which updates need to be imported. There are two
+#  cases:
+#   1. no ras_dbupdates table is present, in which case the updates start from 0.
+#   2. a ras_dbupdates table is present, in this case the updates start from the
+#      number saved in the update column.
+#
+# PRECONDITIONS
+#  1) PostgreSQL server must be running
+#  2) User running the script must have write access in PostgreSQL
+#  3) share/rasdaman/db_updates should contain the SQL update scripts
+
+PROG=$(basename $0)
+
+export RC_OK=0
+export RC_ERROR=255
+
+# updateN.sql scripts
+SCRIPT_DIR=@pkgdatadir@/db_updates
+
+# table storing the current database update number
+export RAS_DBUPDATE=ras_dbupdates
+export DB_TYPE=rc
+
+export BASEDBMS=@basedbms@
+export BASEDBMS_SQLITE=sqlite
+export BASEDBMS_PGSQL=pgsql
+
+export DBCONN=@dbconn@
+
+# ------------------------------------------------------------------------------
+# functions
+# ------------------------------------------------------------------------------
+
+#
+# logging
+#
+log() {
+  echo "$PROG: $*"
+}
+logn() {
+  echo -n "$PROG: $*"
+}
+error() {
+  echo "$PROG: $*" >&2
+  echo "$PROG: exiting." >&2
+  exit $RC_ERROR
+}
+feedback() {
+  if [ $? -ne 0 ]; then
+    echo failed.
+    echo "$PROG: exiting." >&2
+    exit $RC_ERROR
+  else
+    echo ok.
+  fi
+}
+
+export -f log
+export -f logn
+export -f error
+export -f feedback
+
+#
+# checks
+#
+
+if [ ! -d "$SCRIPT_DIR" ]; then
+  error "SQL update script directory not found: $SCRIPT_DIR"
+fi
+
+readonly last_log=$(mktemp)
+
+if [ "$BASEDBMS" == "$BASEDBMS_PGSQL" ]; then
+
+  check_postgres() {
+    which psql > /dev/null || error "PostgreSQL missing, please add psql to the PATH."
+    pgrep postgres > /dev/null
+    if [ $? -ne 0 ]; then
+      pgrep postmaster > /dev/null || error "The PostgreSQL service is not started."
+    fi
+  }
+
+  # ------------------------------------------------------------------------------
+  # work
+  # ------------------------------------------------------------------------------
+
+  #
+  # postgres connection details (defaults used)
+  #
+  RAS_DB=${DBCONN-RASBASE}
+  RAS_PORT=${PGPORT-5432}
+
+
+  #
+  # commands
+  #
+  PSQL="psql -d $RAS_DB -p $RAS_PORT"
+  CREATEDB="createdb -p $RAS_PORT"
+
+  # print some info
+  log "postgres settings"
+  log "  port: $RAS_PORT"
+  log "  db: $RAS_DB"
+
+  check_postgres
+
+  #
+  # check if db is present
+  #
+  psql -p $RAS_PORT --list 2>&1 | egrep "\b$RAS_DB\b" > /dev/null
+  if [ $? -ne 0 ]; then
+    error "no $RAS_DB database found, please run create_db.sh first"
+  fi
+
+
+  #
+  # determine the update number
+  #
+  $PSQL -c "select * from $RAS_DBUPDATE" > /dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    # create from scratch
+    counter=0
+  else
+    # check if there is an entry at all
+    count=`$PSQL -c "select count(UpdateNumber) from RAS_DBUPDATES where UpdateType='$DB_TYPE'" | head -n 3 | tail -n 1 | awk '{print $1}'`
+    if [ $count -gt 0 ]; then
+      # get the last update number
+      counter=`$PSQL -c "select UpdateNumber from $RAS_DBUPDATE where UpdateType='$DB_TYPE'" | head -n 3 | tail -n 1 | awk '{print $1}'`
+    else
+      counter=0
+      $PSQL -c "insert into $RAS_DBUPDATE values('$DB_TYPE', $counter)" > /dev/null 2>&1
+    fi
+  fi
+
+  #
+  # some updates are written in PL/pgSQL, so install the extension in postgres
+  #
+  $PSQL -c "CREATE OR REPLACE LANGUAGE plpgsql" > /dev/null 2>&1
+  rc=$?
+  if [ $rc -ne 0 -a $rc -ne 2 ]; then
+    error "failed creating PL/pgSQL extension in PostgreSQL, please install it first on your system."
+  fi
+
+  #
+  # insert the database updates
+  #
+  echo
+  log "executing updates:"
+  updated=0
+  while [ -f "$SCRIPT_DIR/update$counter.sql" ]; do
+    logn "  update $counter... "
+          # Note for future .sql files: do not add manual BEGIN/COMMIT transactions, they are handled by psql
+    $PSQL --set ON_ERROR_STOP=on --single-transaction -f "$SCRIPT_DIR/update$counter.sql" > "$last_log" 2>&1
+    # Check if the update was successful
+    ret=$?
+    if [ "$ret" -ne 0 ]; then
+        echo "FAILED (return value $ret)."
+        echo "Error: "$(cat "$last_log")
+        break # So that ps_dbupdates is updated to its partial update anyway.
+      else
+        echo ok.
+    fi
+    counter=$(($counter+1))
+    updated=1
+  done
+
+  #
+  # save the last update number
+  #
+  if [ $updated -eq 1 ]; then
+    $PSQL -c "update $RAS_DBUPDATE set UpdateNumber=$counter where UpdateType='$DB_TYPE'" > /dev/null 2>&1
+    log "updated database to update $((counter-1))"
+  else
+    log "database already up-to-date, nothing to update."
+  fi
+
+else
+
+  check_sqlite() {
+    which sqlite3 > /dev/null || error "sqlite3 missing, please install."
+  }
+
+  # ------------------------------------------------------------------------------
+  # work
+  # ------------------------------------------------------------------------------
+
+  check_sqlite
+
+  #
+  # commands
+  #
+  export SQLITE="sqlite3 $DBCONN"
+  if [ ! -f "$DBCONN" ]; then
+    error "no '$DBCONN' database found, please run create_db.sh first"
+  fi
+  log "sqlite database to update: $DBCONN"
+
+  # determine file data dir
+  if [ -z "$RASDATA" ]; then
+    export RASDATA="@filedatadir@"
+    [ -n "$RASDATA" ] || error "please export RASDATA to point to the rasdaman data directory"
+  fi
+  [ -d "$RASDATA" ] || error "rasdaman data directory not found: $RASDATA"
+  [ -w "$RASDATA" -a -x "$RASDATA" ] || error "no write permissions to the rasdaman data directory: $RASDATA"
+  log "rasdaman data directory: $RASDATA"
+
+  #
+  # determine the update number
+  #
+  $SQLITE "select * from $RAS_DBUPDATE" > "$last_log" 2>&1
+  if [ $? -ne 0 ]; then
+    # create from scratch
+    counter=0
+  else
+    # check if there is an entry at all
+    count=$($SQLITE "select count(UpdateNumber) from RAS_DBUPDATES where UpdateType='$DB_TYPE'" | head -n 1)
+    if [ $count -gt 0 ]; then
+      # get the last update number
+      counter=$($SQLITE "select UpdateNumber from $RAS_DBUPDATE where UpdateType='$DB_TYPE'" | head -n 1)
+    else
+      counter=0
+      $SQLITE "insert into $RAS_DBUPDATE values('$DB_TYPE', $counter)" > "$last_log" 2>&1
+    fi
+  fi
+
+  #
+  # insert the database updates
+  #
+  echo
+  log "executing updates:"
+  updated=0
+  while [ -f "$SCRIPT_DIR/update${counter}-sqlite.sql" -o -f "$SCRIPT_DIR/update${counter}-sqlite.sh" ]; do
+    logn "  update $counter... "
+    if [ -f "$SCRIPT_DIR/update${counter}-sqlite.sql" ]; then
+      $SQLITE < "$SCRIPT_DIR/update${counter}-sqlite.sql" > "$last_log" 2>&1
+    else
+      bash "$SCRIPT_DIR/update${counter}-sqlite.sh"
+    fi
+    # Check if the update was successful
+    ret=$?
+    if [ "$ret" -ne 0 ]; then
+        echo "FAILED (return value $ret)."
+        [ -f "$last_log" ] && echo "Error: "$(cat "$last_log")
+        break # So that ps_dbupdates is updated to its partial update anyway.
+      else
+        echo ok.
+    fi
+    counter=$(($counter+1))
+    updated=1
+  done
+
+  #
+  # save the last update number
+  #
+  if [ $updated -eq 1 ]; then
+    $SQLITE "update $RAS_DBUPDATE set UpdateNumber=$counter where UpdateType='$DB_TYPE'" > "$last_log" 2>&1
+    log "updated database to update $((counter-1))"
+  else
+    log "database already up-to-date, nothing to update."
+  fi
+
+fi
+
+rm -f "$last_log"
+
+#
+# done
+#
+echo
+log "done, exiting."
+exit $RC_OK

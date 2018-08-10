@@ -1,0 +1,6 @@
+for $c in (test_mr) return encode(
+   scale(
+	trim($c, { i (59:60), j (20:21) })
+        ,{ i (0:1), j (0:1) }
+      )
+  ,"text/csv")

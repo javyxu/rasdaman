@@ -1,0 +1,1 @@
+for $c in ( test_rgb ) return encode( log(($c.2)[ i(100:101), j(100:101) ] ), "image/png", "nodata=0" )

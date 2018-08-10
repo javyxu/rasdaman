@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gmlcov:RectifiedGridCoverage id="test_rgb"
+    xmlns="http://www.opengis.net/gml/3.2"
+    
+    
+    
+    
+     >
+    <boundedBy>
+        <Envelope axisLabels="i j" srsDimension="2"
+            srsName="/crs/OGC/0/Index2D" uomLabels="GridSpacing GridSpacing">
+            <lowerCorner>10 10</lowerCorner>
+            <upperCorner>11 11</upperCorner>
+        </Envelope>
+    </boundedBy>
+    <domainSet>
+        <RectifiedGrid dimension="2" id="test_rgb-grid">
+            <limits>
+                <GridEnvelope>
+                    <low>10 333</low>
+                    <high>10 333</high>
+                </GridEnvelope>
+            </limits>
+            <axisLabels>i j</axisLabels>
+            <origin>
+                <Point id="test_rgb-origin" srsName="/crs/OGC/0/Index2D">
+                    <pos>10.5 10.5</pos>
+                </Point>
+            </origin>
+            <offsetVector srsName="/crs/OGC/0/Index2D">1 0</offsetVector>
+            <offsetVector srsName="/crs/OGC/0/Index2D">0 -1</offsetVector>
+        </RectifiedGrid>
+    </domainSet>
+    <rangeSet>
+        <DataBlock>
+            <rangeParameters/>
+            <tupleList cs=" " ts=",">119 208</tupleList>
+        </DataBlock>
+    </rangeSet>
+    <coverageFunction>
+        <GridFunction>
+            <sequenceRule axisOrder="+2 +1">Linear</sequenceRule>
+            <startPoint>10 333</startPoint>
+        </GridFunction>
+    </coverageFunction>
+    <gmlcov:rangeType>
+        <swe:DataRecord>
+            <swe:field name="red">
+                <swe:Quantity >
+                    <swe:label>red</swe:label>
+                    <swe:nilValues>
+                        <swe:NilValues>
+                            <swe:nilValue reason="">119.0</swe:nilValue>
+                        </swe:NilValues>
+                    </swe:nilValues>
+                    <swe:uom code="10^0"/>
+                </swe:Quantity>
+            </swe:field>
+            <swe:field name="green">
+                <swe:Quantity >
+                    <swe:label>green</swe:label>
+                    <swe:nilValues>
+                        <swe:NilValues>
+                            <swe:nilValue reason="">208.0</swe:nilValue>
+                        </swe:NilValues>
+                    </swe:nilValues>
+                    <swe:uom code="10^0"/>
+                </swe:Quantity>
+            </swe:field>
+        </swe:DataRecord>
+    </gmlcov:rangeType>
+    <gmlcov:metadata>
+        <gmlcov:Extension>
+            <covMetadata>
+{
+    "resolution": "1"
+}
+                </covMetadata>
+        </gmlcov:Extension>
+    </gmlcov:metadata>
+</gmlcov:RectifiedGridCoverage>

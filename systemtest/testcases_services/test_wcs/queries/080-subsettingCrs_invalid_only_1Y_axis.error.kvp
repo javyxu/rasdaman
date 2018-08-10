@@ -1,0 +1,8 @@
+service=WCS&
+version=2.0.1&
+request=GetCoverage&
+coverageId=test_irr_cube_2&
+subset=N(9.6238571)&
+subset=E(46.8759583,47.4257442)&
+subsettingCrs=http://localhost:8080/def/crs/EPSG/0/4326&
+format=image/tiff

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ows:ExceptionReport version="2.0.1"
+    
+      >
+    <ows:Exception exceptionCode="IllegalFieldSequence">
+        <ows:ExceptionText>Lower limit is above the upper limit in the range field interval, received: .green:red</ows:ExceptionText>
+    </ows:Exception>
+</ows:ExceptionReport>

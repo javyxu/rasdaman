@@ -1,0 +1,569 @@
+// This is -*- C++ -*-
+
+/*
+* This file is part of rasdaman community.
+*
+* Rasdaman community is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* Rasdaman community is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+*
+* Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 Peter Baumann /
+rasdaman GmbH.
+*
+* For more information please see <http://www.rasdaman.org>
+* or contact Peter Baumann via <baumann@rasdaman.com>.
+*/
+/*************************************************************
+ *
+ *
+ * PURPOSE:
+ *
+ *
+ * COMMENTS:
+ *
+ ************************************************************/
+
+
+#include "config.h"
+#include "reladminif/oidif.hh"
+#include "reladminif/dbref.hh"
+#include "reladminif/sqlerror.hh"
+#include "reladminif/externs.h"
+#include "catalogmgr/typefactory.hh"
+#include "relcatalogif/mddbasetype.hh"
+#include "relcatalogif/basetype.hh"
+#include "reladminif/objectbroker.hh"
+#include "relcatalogif/dbminterval.hh"
+#include "relcatalogif/dbnullvalues.hh"
+#include "relstorageif/dbstoragelayout.hh"
+#include "dbmddobj.hh"
+#include "relindexif/indexid.hh"
+#include "indexmgr/indexds.hh"
+#include <logging.hh>
+
+#include "debug-srv.hh"
+
+
+DBMDDObj::DBMDDObj()
+    :   DBObject(),
+        myDomain(NULL),
+        objIxId(),
+        mddType(NULL),
+        persistentRefCount(0),
+        nullValues(NULL),
+        storageLayoutId(new DBStorageLayout())
+{
+    objecttype = OId::MDDOID;
+    myDomain = new DBMinterval();
+    myDomain->setPersistent(true);
+    storageLayoutId->setPersistent(true);
+}
+
+DBMDDObj::DBMDDObj(const OId& id)
+    :   DBObject(id),
+        myDomain(NULL),
+        objIxId(),
+        persistentRefCount(0),
+        mddType(NULL),
+        nullValues(NULL),
+        storageLayoutId(0LL)
+{
+    objecttype = OId::MDDOID;
+    readFromDb();
+}
+
+DBMDDObj::DBMDDObj( const MDDBaseType* newMDDType,
+                    const r_Minterval& domain,
+                    const DBObjectId& newObjIx,
+                    const DBStorageLayoutId& newSL,
+                    const OId& newOId)
+    :   DBObject(),
+        objIxId(newObjIx.getOId()),
+        mddType(newMDDType),
+        persistentRefCount(0),
+        storageLayoutId(newSL),
+        nullValues(NULL),
+        myDomain(NULL)
+{
+    objecttype = OId::MDDOID;
+    EXEC SQL BEGIN DECLARE SECTION;
+        long    testoid1;
+    EXEC SQL END DECLARE SECTION;
+
+    testoid1 = newOId.getCounter();
+
+    LDEBUG <<  "EXEC SQL SELECT MDDId INTO :testoid1 FROM RAS_MDDOBJECTS WHERE MDDId = " << testoid1;
+    EXEC SQL SELECT
+        MDDId
+       INTO
+        :testoid1
+       FROM
+        RAS_MDDOBJECTS
+       WHERE
+        MDDId = :testoid1;
+    if (SQLCODE != SQLNODATAFOUND)
+    {
+        ((DBObjectId)newObjIx)->setPersistent(false);
+        ((DBObject*)newSL.ptr())->setPersistent(false);
+        if (SQLCODE == SQLOK)
+        {
+            LTRACE << "OId is already there";
+            LFATAL << "DBMDDObj::DBMDDObj(...) OId already exists";
+            throw r_Error(r_Error::r_Error_OIdNotUnique);
+        }
+        else
+        {
+            check("DBMDDObj(type, domain, index, layout, oid)");
+            generateException();
+        }
+    }
+    if (newMDDType->isPersistent())
+        mddType = newMDDType;
+    else
+        mddType = (const MDDBaseType*)TypeFactory::addMDDType(newMDDType);
+    myDomain = new DBMinterval(domain);
+    _isPersistent = true;
+    _isModified = true;
+    myOId = newOId;
+    setPersistent(true);
+}
+
+
+DBMDDObj::DBMDDObj(const DBMDDObj& old)
+    :   DBObject(old),
+        objIxId(),
+        mddType(NULL),
+        persistentRefCount(0),
+        storageLayoutId(),
+        nullValues(NULL),
+        myDomain(NULL)
+{
+    if (old.myDomain)
+    {
+        if (old.myDomain->isPersistent())
+        {
+            myDomain = (DBMinterval*)ObjectBroker::getObjectByOId(old.myDomain->getOId());
+        }
+        else
+        {
+            myDomain = new DBMinterval(*old.myDomain);
+            myDomain->setPersistent(true);
+        }
+    }
+    else
+    {
+        myDomain = NULL;
+    }
+
+    objIxId = old.objIxId;
+    storageLayoutId = old.storageLayoutId;
+    persistentRefCount = old.persistentRefCount;
+    mddType = old.mddType;
+}
+
+DBMDDObj::DBMDDObj(const MDDBaseType* newMDDType, const r_Minterval& domain, const DBObjectId& newObjIx, const DBStorageLayoutId& newSL)
+    :   DBObject(),
+        objIxId(newObjIx),
+        mddType(NULL),
+        persistentRefCount(0),
+        storageLayoutId(newSL),
+        nullValues(NULL),
+        myDomain(NULL)
+{
+    objecttype = OId::MDDOID;
+    myDomain = new DBMinterval(domain);
+    mddType = newMDDType;
+    /*only if it is a persistent mdd
+        if (newMDDType->isPersistent())
+            mddType = (MDDBaseType*)newMDDType;
+        else
+            mddType = (MDDBaseType*)TypeFactory::addMDDType(newMDDType);
+        setPersistent(true);
+    */
+}
+
+DBMDDObj::~DBMDDObj()
+{
+    validate();
+    if (myDomain)
+        delete myDomain;
+    myDomain = NULL;
+
+    if (nullValues)
+        delete nullValues;
+    nullValues = NULL;
+}
+
+DBStorageLayoutId
+DBMDDObj::getDBStorageLayout() const
+{
+    return storageLayoutId;
+}
+
+r_Bytes
+DBMDDObj::getMemorySize() const
+{
+    return DBObject::getMemorySize() + sizeof(long) + sizeof(MDDBaseType*) + sizeof(DBMinterval*) + sizeof(OId) + myDomain->getMemorySize() + mddType->getMemorySize() + sizeof(OId);
+}
+
+const MDDBaseType*
+DBMDDObj::getMDDBaseType() const
+{
+    return mddType;
+}
+
+const BaseType*
+DBMDDObj::getCellType() const
+{
+    return mddType->getBaseType();
+}
+
+r_Dimension
+DBMDDObj::dimensionality() const
+{
+    return myDomain->dimension();
+}
+
+void
+DBMDDObj::setCached(bool ic)
+{
+    DBObject::setCached(ic);
+    if (myDomain)
+        myDomain->setCached(ic);
+}
+
+//this should only receive an setPersistent(false)
+void
+DBMDDObj::setPersistent(bool o)
+{
+    DBObject::setPersistent(o);
+    if (!o)
+        setCached(false);
+    if (myDomain)
+        myDomain->setPersistent(o);
+    DBObjectId testIx(objIxId);
+    if (testIx.is_null())
+    {
+        LTRACE << "index object is not valid " << myOId << " index " << objIxId.getOId();
+        throw r_Error(INDEX_OF_MDD_IS_NULL);
+    }
+    else
+    {
+        testIx->setPersistent(o);
+        if (o)
+        {
+            objIxId.release();
+        }
+    }
+
+    if (storageLayoutId.is_null())
+    {
+        LTRACE << "layout object is not valid " << myOId << " layout " << storageLayoutId.getOId();
+        LFATAL << "DBMDDObj::setPersistent() layout object is not valid";
+        throw r_Error(STORAGE_OF_MDD_IS_NULL);
+    }
+    else
+    {
+        storageLayoutId->setPersistent(o);
+    }
+    if (o && !mddType->isPersistent())
+        mddType = (const MDDBaseType*)TypeFactory::addMDDType(mddType);
+}
+
+const char*
+DBMDDObj::getCellTypeName() const
+{
+    return mddType->getBaseType()->getTypeName();
+}
+
+r_Minterval
+DBMDDObj::getDefinitionDomain() const
+{
+    return *myDomain;
+}
+
+r_Bytes
+DBMDDObj::getHeaderSize() const
+{
+    r_Bytes sz = sizeof(MDDBaseType*) + sizeof(r_Minterval*) + sizeof(DBObjectId) + sizeof(DBObject) + sizeof(DBStorageLayoutId);
+    return sz;
+}
+
+void
+DBMDDObj::printStatus(unsigned int level, ostream& stream) const
+{
+    DBObject::printStatus(level, stream);
+    stream << *myDomain << endl;
+    mddType->printStatus(level + 1, stream);
+    DBObjectId testIx(objIxId);
+    if (!testIx.is_null())
+        testIx->printStatus(level + 1, stream);
+    else
+        stream << "index is invalid " << objIxId.getOId();
+    if (storageLayoutId.is_null())
+        stream << "storagelayout is invalid " << storageLayoutId.getOId();
+    else
+        storageLayoutId->printStatus(level + 1, stream);
+}
+
+void
+DBMDDObj::setIx(const DBObjectId& newIx)
+{
+    if (isPersistent())
+    {
+        if (objIxId.getOId() != newIx.getOId())
+        {
+            objIxId = newIx.getOId();
+            setModified();
+        }
+    }
+    else
+    {
+        objIxId = newIx;
+    }
+}
+
+void
+DBMDDObj::updateInDb()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        long        mddoid3;
+        long long   objindex3;
+        long        persRefCount3;
+        long long   nullvalueoid;
+        long long   oldnullvalueoid;
+        long long   settypeoid;
+        long        count;
+    EXEC SQL END DECLARE SECTION;
+
+    objindex3 = objIxId.getOId();
+    mddoid3 = myOId.getCounter();
+    persRefCount3 = persistentRefCount;
+
+    LDEBUG <<  "EXEC SQL UPDATE RAS_MDDOBJECTS SET PersRefCount = " << persRefCount3 << ", NodeOId = " << objindex3 << " WHERE MDDId = " << mddoid3;
+    EXEC SQL UPDATE RAS_MDDOBJECTS SET PersRefCount = :persRefCount3, NodeOId = :objindex3
+       WHERE MDDId = :mddoid3;
+    if (SQLCODE != SQLOK)
+    {
+        check("DBMDDObj::updateInDb()\0");
+        generateException();
+    }
+
+    if (nullValues != NULL)
+    {
+        LDEBUG << "Updating null values";
+        nullValues->setPersistent(true);
+        nullvalueoid = nullValues->getOId().getCounter();
+
+        LDEBUG << "EXEC SQL SELECT c.settypeid INTO :settypeoi FROM ras_mddcollnames as c, ras_mddcollections as m WHERE m.mddcollid = c.mddcollid and m.mddid = " << mddoid3;
+        EXEC SQL SELECT c.settypeid
+                 INTO :settypeoid
+                 FROM ras_mddcollnames as c, ras_mddcollections as m
+                 WHERE m.mddcollid = c.mddcollid and m.mddid = :mddoid3;
+        if (SQLCODE != SQLOK)
+        {
+            check("DBMDDObj::updateInDb()\0");
+            generateException();
+        }
+
+        LDEBUG << "EXEC SQL SELECT COUNT(settypeoid) INTO :count FROM RAS_NULLVALUES WHERE settypeoid = " << settypeoid;
+        EXEC SQL SELECT COUNT(settypeoid)
+                 INTO :count
+                 FROM RAS_NULLVALUES
+                 WHERE settypeoid = :settypeoid;
+        if (SQLCODE != SQLOK)
+        {
+            check("DBMDDObj::updateInDb()\0");
+            generateException();
+        }
+
+        if (count > 0) {
+            LDEBUG << "EXEC SQL SELECT nullvalueoid INTO :oldnullvalueoid FROM RAS_NULLVALUES WHERE settypeoid = " << settypeoid;
+            EXEC SQL SELECT nullvalueoid
+                     INTO :oldnullvalueoid
+                     FROM RAS_NULLVALUES
+                     WHERE settypeoid = :settypeoid;
+            if (SQLCODE != SQLOK)
+            {
+                check("DBMDDObj::updateInDb()\0");
+                generateException();
+            }
+
+            DBNullvalues* oldNullValues = (DBNullvalues*) ObjectBroker::getObjectByOId(OId(oldnullvalueoid, OId::DBNULLVALUESOID));
+            if (oldNullValues)
+            {
+                oldNullValues->setPersistent(false);
+                oldNullValues->validate();
+                delete oldNullValues;
+            }
+
+            LDEBUG << "EXEC SQL DELETE FROM RAS_NULLVALUES WHERE nullvalueoid = " << oldnullvalueoid;
+            EXEC SQL DELETE FROM RAS_NULLVALUES
+                     WHERE nullvalueoid = :oldnullvalueoid;
+            if (SQLCODE != SQLOK)
+            {
+                check("DBMDDObj::updateInDb()\0");
+                generateException();
+            }
+        }
+        LDEBUG << "EXEC SQL INSERT INTO RAS_NULLVALUES (settypeoid, NullValueOId) VALUES (" << settypeoid << ", " << nullvalueoid << ");";
+        EXEC SQL INSERT INTO RAS_NULLVALUES (settypeoid, NullValueOId)
+                 VALUES (:settypeoid, :nullvalueoid);
+    }
+
+    DBObject::updateInDb();
+}
+
+void
+DBMDDObj::insertInDb()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        long        mddoid;
+        long long   basetypeid;
+        long long   storage;
+        long        domainid;
+        long long   objindex;
+        long        persRefCount;
+    EXEC SQL END DECLARE SECTION;
+
+    storage = storageLayoutId->getOId();
+    objindex = objIxId.getOId();
+    mddoid = myOId.getCounter();
+    basetypeid = mddType->getOId();
+    domainid = myDomain->getOId().getCounter();
+    persRefCount = persistentRefCount;
+
+    LDEBUG <<  "EXEC SQL INSERT INTO RAS_MDDOBJECTS ( MDDId, BaseTypeOId, DomainId, PersRefCount, NodeOId, StorageOId) VALUES	( " << mddoid << "," << basetypeid<< "," << domainid<< "," << persRefCount << "," << objindex << "," << storage << ")";
+    EXEC SQL INSERT INTO RAS_MDDOBJECTS ( MDDId, BaseTypeOId, DomainId, PersRefCount, NodeOId, StorageOId)
+       VALUES   ( :mddoid, :basetypeid, :domainid, :persRefCount, :objindex, :storage);
+    if (SQLCODE != SQLOK)
+    {
+        check("DBMDDObj::insertInDb()");
+        generateException();
+    }
+
+    DBObject::insertInDb();
+}
+
+void
+DBMDDObj::deleteFromDb()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        long    mddoid1;
+    EXEC SQL END DECLARE SECTION;
+
+    mddoid1 = myOId.getCounter();
+
+    LDEBUG <<  "EXEC SQL DELETE FROM RAS_MDDOBJECTS WHERE MDDId = " << mddoid1;
+    EXEC SQL DELETE FROM RAS_MDDOBJECTS WHERE MDDId = :mddoid1;
+    if (SQLCODE != SQLOK)
+    {
+        check("DBMDDObj::deleteFromDb()\0");
+        generateException();
+    }
+    DBObject::deleteFromDb();
+}
+
+void
+DBMDDObj::readFromDb()
+{
+#ifdef RMANBENCHMARK
+    DBObject::readTimer.resume();
+#endif
+    EXEC SQL BEGIN DECLARE SECTION;
+        long      mddoid2;
+        long long basetypeid2;
+        long      domainid2;
+        long long objindex2;
+        long      persRefCount2;
+        long long storage2;
+    EXEC SQL END DECLARE SECTION;
+
+    mddoid2 = myOId.getCounter();
+
+    LDEBUG <<  "EXEC SQL SELECT BaseTypeOId, DomainId, PersRefCount, NodeOId, StorageOId INTO :basetypeid2, :domainid2, :persRefCount2, :objindex2, :storage2 FROM RAS_MDDOBJECTS WHERE MDDId = " << mddoid2;
+
+    EXEC SQL SELECT BaseTypeOId, DomainId, PersRefCount, NodeOId, StorageOId
+       INTO :basetypeid2, :domainid2, :persRefCount2, :objindex2, :storage2
+       FROM RAS_MDDOBJECTS
+       WHERE MDDId = :mddoid2;
+    if (SQLCODE != SQLOK)
+    {
+        if (SQLCODE == SQLNODATAFOUND)
+        {
+            LTRACE << "object not found";
+            throw r_Error(r_Error::r_Error_ObjectUnknown);
+        }
+        else
+        {
+            check("DBMDDObj::readFromDb()\0");
+            generateException();
+        }
+    }
+
+    objIxId = OId(objindex2);
+    storageLayoutId = OId(storage2);
+    persistentRefCount = persRefCount2;
+    mddType = (MDDBaseType*)ObjectBroker::getObjectByOId(OId(basetypeid2));
+    myDomain = (DBMinterval*)ObjectBroker::getObjectByOId(OId(domainid2, OId::DBMINTERVALOID));
+    myDomain->setCached(true);
+
+    DBObject::readFromDb();
+#ifdef RMANBENCHMARK
+    DBObject::readTimer.pause();
+#endif
+}
+
+
+DBObjectId
+DBMDDObj::getDBIndexDS() const
+{
+    return objIxId;
+}
+
+int
+DBMDDObj::getPersRefCount() const
+{
+    return persistentRefCount;
+}
+
+void
+DBMDDObj::incrementPersRefCount()
+{
+    persistentRefCount++;
+    setModified();
+}
+
+void
+DBMDDObj::decrementPersRefCount()
+{
+    persistentRefCount--;
+    if (persistentRefCount == 0)
+        setPersistent(false);
+    setModified();
+}
+
+DBNullvalues*
+DBMDDObj::getNullValues() const
+{
+  if (nullValues != NULL) {
+    LDEBUG << "returning null values: " << nullValues->toString();
+  }
+  return nullValues;
+}
+
+void
+DBMDDObj::setNullValues(const r_Nullvalues& newNullValues)
+{
+  nullValues = new DBNullvalues(newNullValues);
+  setModified();
+}

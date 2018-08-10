@@ -1,0 +1,202 @@
+// This is -*- C++ -*-
+
+/*
+* This file is part of rasdaman community.
+*
+* Rasdaman community is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* Rasdaman community is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+*
+* Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 Peter Baumann /
+rasdaman GmbH.
+*
+* For more information please see <http://www.rasdaman.org>
+* or contact Peter Baumann via <baumann@rasdaman.com>.
+*/
+/*************************************************************
+ *
+ *
+ * PURPOSE:
+ *   Code with embedded SQL for PostgreSQL DBMS
+ *
+ *
+ * COMMENTS:
+ *   uses embedded SQL
+ *
+ ************************************************************/
+
+#include "config.h"
+#include "debug-srv.hh"
+
+// general embedded SQL related definitions
+EXEC SQL include "../reladminif/sqlglobals.h";
+
+#include "settype.hh"
+#include "mddtype.hh"
+#include "reladminif/sqlerror.hh"
+#include "reladminif/externs.h"
+#include "reladminif/objectbroker.hh"
+#include <logging.hh>
+
+void
+SetType::insertInDb()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        long long  mddtypeid;
+        char    settypename[VARCHAR_MAXLEN];
+        long long    settypeid;
+        long long    nullvalueoid;
+    EXEC SQL END DECLARE SECTION;
+
+    (void) strncpy( settypename, const_cast<char*>(getTypeName()), sizeof(settypename) );
+    settypeid = myOId.getCounter();
+    mddtypeid = getMDDType()->getOId();
+
+    LDEBUG << "EXEC SQL INSERT INTO RAS_SETTYPES ( SetTypeId, SetTypeName, MDDTypeOId) VALUES( " << settypeid << ", " << settypename << ", " << mddtypeid << " )";
+    EXEC SQL INSERT INTO RAS_SETTYPES ( SetTypeId, SetTypeName, MDDTypeOId)
+       VALUES   ( :settypeid, :settypename, :mddtypeid);
+    if (SQLCODE != SQLOK)
+    {
+        check("SetType::insertInDb()");
+        generateException();
+    }
+
+    if (nullValues != NULL)
+    {
+        nullValues->setPersistent(true);
+        nullvalueoid = nullValues->getOId().getCounter();
+
+        LDEBUG << "EXEC SQL INSERT INTO RAS_NULLVALUES ( SetTypeOId, NullValueOId) VALUES	( " << settypeid << ", " << nullvalueoid << " )";
+        EXEC SQL INSERT INTO RAS_NULLVALUES ( SetTypeOId, NullValueOId)
+          VALUES    ( :settypeid, :nullvalueoid );
+        if (SQLCODE != SQLOK)
+        {
+            check("SetType::insertInDb()");
+            generateException();
+        }
+    }
+
+    DBObject::insertInDb();
+}
+
+void
+SetType::deleteFromDb()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        long    settypeid3;
+    EXEC SQL END DECLARE SECTION;
+
+    settypeid3 = myOId.getCounter();
+
+    LDEBUG << "EXEC SQL DELETE FROM RAS_SETTYPES WHERE RAS_SETTYPES.SetTypeId = " << settypeid3;
+    EXEC SQL DELETE FROM RAS_SETTYPES WHERE RAS_SETTYPES.SetTypeId = :settypeid3;
+    if (SQLCODE != SQLOK)
+    {
+        check("SetType::deleteFromDb()");
+        generateException();
+    }
+
+    LDEBUG << "EXEC SQL DELETE FROM RAS_NULLVALUES WHERE SetTypeOId = " << settypeid3;
+    EXEC SQL DELETE FROM RAS_NULLVALUES
+    WHERE SetTypeOId = :settypeid3;
+    if (SQLCODE != SQLOK && SQLCODE != SQLNODATAFOUND)
+    {
+        check("SetType::deleteFromDb()");
+        generateException();
+    }
+
+    if (nullValues != NULL)
+    {
+        nullValues->setPersistent(false);
+        nullValues->setCached(false);
+    }
+
+    DBObject::deleteFromDb();
+}
+
+void
+SetType::readFromDb()
+{
+#ifdef RMANBENCHMARK
+    DBObject::readTimer.resume();
+#endif
+    EXEC SQL BEGIN DECLARE SECTION;
+        long long  mddtypeid1;
+        char    settypename1[VARCHAR_MAXLEN];
+        long long    settypeid1;
+        long long    nullvalueoid2;
+        int   nullValuesTableCheck;
+    EXEC SQL END DECLARE SECTION;
+
+    settypeid1 = myOId.getCounter();
+    mddtypeid1 = 0;
+
+    LDEBUG << "EXEC SQL SELECT SetTypeName, MDDTypeOId INTO :settypename1, :mddtypeid1 FROM RAS_SETTYPES WHERE SetTypeId = " << settypeid1;
+    EXEC SQL SELECT SetTypeName, MDDTypeOId
+       INTO :settypename1, :mddtypeid1
+       FROM RAS_SETTYPES
+       WHERE SetTypeId = :settypeid1;
+    LDEBUG << "Sql code: " << SQLCODE;
+    if (check("SetType::readFromDb()") != 0)
+    {
+        if (SQLCODE == SQLNODATAFOUND)  // was: 100 -- PB 2005-feb-13
+            throw r_Error(r_Error::r_Error_ObjectUnknown);
+        else
+            generateException();
+    }
+
+    setName(settypename1);
+    myType = SETTYPE;
+    myMDDType = (MDDType*)ObjectBroker::getObjectByOId(OId(mddtypeid1));
+
+    // test if null values table exists -- DM 2012-jun-12
+    EXEC SQL SELECT COUNT(*)
+      INTO :nullValuesTableCheck
+      FROM pg_tables WHERE tablename = 'ras_nullvalues';
+
+    if (nullValuesTableCheck == 1)
+    {
+        LDEBUG << "EXEC SQL SELECT NullValueOId INTO :nullvalueoid2 FROM RAS_NULLVALUES WHERE SetTypeOId = " << settypeid1;
+        EXEC SQL SELECT NullValueOId INTO :nullvalueoid2
+          FROM RAS_NULLVALUES
+          WHERE SetTypeOId = :settypeid1;
+        if (SQLCODE != SQLOK)
+        {
+            if (SQLCODE != SQLNODATAFOUND)
+            {
+                generateException();
+            }
+            else
+            {
+                SQLCODE = SQLOK;
+                LDEBUG << "No null values found.";
+            }
+        }
+        else
+        {
+            nullValues = (DBNullvalues*)ObjectBroker::getObjectByOId(OId(nullvalueoid2, OId::DBNULLVALUESOID));
+            nullValues->setCached(true);
+            LDEBUG << "Got null values: " << nullValues->toString();
+        }
+    }
+    else
+    {
+        LDEBUG << "No support for null values in the database, please upgrade.";
+    }
+
+    DBObject::readFromDb();
+
+#ifdef RMANBENCHMARK
+    DBObject::readTimer.pause();
+#endif
+}
+

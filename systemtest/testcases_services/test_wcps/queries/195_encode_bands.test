@@ -1,0 +1,1 @@
+for c in ( test_rgb_nodata )  return encode((c.red + c.blue)[i(100:100), j(100:100)] + c[i(100:100), j(100:100)].blue - (c.red + c.green + c.blue)[i(100:100),j(100:100)], "png")

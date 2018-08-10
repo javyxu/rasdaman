@@ -1,0 +1,111 @@
+/*
+* This file is part of rasdaman community.
+*
+* Rasdaman community is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* Rasdaman community is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+*
+* Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 Peter Baumann /
+rasdaman GmbH.
+*
+* For more information please see <http://www.rasdaman.org>
+* or contact Peter Baumann via <baumann@rasdaman.com>.
+*/
+/*************************************************************************
+ *
+ *
+ * PURPOSE:
+ * implements adminif interface using the PostgreSQL DBMS.
+ *
+ *
+ * COMMENTS:
+ *   none
+ *
+ ***********************************************************************/
+
+static const char rcsid[] = "@(#)reladminif,AdminIf: $Id: adminif.ec,v 1.6 2003/12/27 23:11:43 rasdev Exp $";
+
+#include "config.h"
+#include "debug-srv.hh"
+#include "sqlerror.hh"
+
+// general embedded SQL related definitions
+EXEC SQL include sqlglobals.h;
+
+#include "adminif.hh"
+#include "raslib/rmdebug.hh"
+#include "objectbroker.hh"
+
+#include <logging.hh>
+
+extern char globalConnectId[256];
+extern char globalDbUser[255];
+extern char globalDbPasswd[255];
+
+const char AdminIf::dbmsName[SYSTEMNAME_MAXLEN]="PostgreSQL";
+
+AdminIf::AdminIf(bool createDb)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char    id[STRING_MAXLEN];
+        char    user[STRING_MAXLEN];
+        char    passwd[STRING_MAXLEN];
+    EXEC SQL END DECLARE SECTION;
+
+    strncpy((char *)&id, globalConnectId, sizeof(id)-1);
+
+    //Check if a user and password has been provided for connection
+    if ( strlen(globalDbUser) > 0 )
+    {
+        strncpy((char *)&user, globalDbUser, sizeof(user)-1);
+        if ( strlen(globalDbPasswd) > 0 )
+        {
+            strncpy((char *)&passwd, globalDbPasswd, sizeof(passwd)-1);
+            LDEBUG << "EXEC SQL CONNECT TO " << id << "USER" << user << "USING" << passwd;
+            EXEC SQL CONNECT TO :id USER :user USING :passwd;
+        }
+        else
+        {
+            LDEBUG << "EXEC SQL CONNECT TO " << id << "USER" << user;
+            EXEC SQL CONNECT TO :id USER :user;
+        }
+    }
+    else
+    {
+        LDEBUG << "EXEC SQL CONNECT TO " << id;
+        EXEC SQL CONNECT TO :id;
+    }
+
+    if (check("AdminIf Connect\0"))
+    {
+        validConnection = false;
+        LDEBUG << "connect unsuccessful; wrong connect string?";
+        cout << "Error: connect unsuccessful; wrong connect string '" << globalConnectId << "' ?" << endl;
+        throw r_Error( DATABASE_CONNECT_FAILED );
+    }
+    else
+    {
+        validConnection = true;
+        LDEBUG << "connect ok";
+    }
+
+    LDEBUG << "EXEC SQL ROLLBACK WORK";
+    EXEC SQL ROLLBACK WORK;
+
+#ifndef FASTCONNECT
+    LDEBUG << "EXEC SQL DISCONNECT CURRENT";
+    EXEC SQL DISCONNECT CURRENT;
+#endif
+
+    ObjectBroker::init();
+}
+

@@ -1,0 +1,13 @@
+008-get_coverage_jp2.kvp
+008-get_coverage_jp2.xml
+014-get_coverage_jp2_slice_t_crs1.kvp
+014-get_coverage_jp2_slice_t_crs1.xml
+048-get_coverage_gmljp2.kvp
+048-get_coverage_gmljp2.xml
+084-outputCrs-and-scale.kvp
+#Failed for difference with gdalinfo of bounding box
+076-subsettingCrs_3857_to_4326.kvp
+078-subsettingCrs_32633_to_4326.kvp
+#Failed for different elements's order for coverage's extra metadata in Ubuntu 14.04
+100-describe_gdal_uomCode.kvp
+101-describe_grib_uomCode.kvp

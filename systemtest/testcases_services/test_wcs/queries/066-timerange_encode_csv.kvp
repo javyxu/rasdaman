@@ -1,0 +1,7 @@
+service=WCS&
+version=2.0.1&
+request=GetCoverage&
+coverageId=test_eobstest&
+subset=Lat(30.4,30.5)&
+subset=Long(40.0,40.1)&
+subset=t("1950-01-03T13:05:00","1950-01-05T13:05:00")

@@ -1,0 +1,816 @@
+/*
+* This file is part of rasdaman community.
+*
+* Rasdaman community is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* Rasdaman community is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+*
+* Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 Peter Baumann /
+rasdaman GmbH.
+*
+* For more information please see <http://www.rasdaman.org>
+* or contact Peter Baumann via <baumann@rasdaman.com>.
+*/
+#include "config.h"
+#include "mymalloc/mymalloc.h"
+// This is -*- C++ -*-
+/*************************************************************
+ *
+ *
+ * PURPOSE:
+ * implements blobtile interface using the PostgreSQL DBMS.
+ *
+ *
+ * COMMENTS:
+ * - uses LO blob method, this has been tested to be faster than bytea
+ * - RMDBG macros generate so weird output that I added DEBUG macros
+ *   although this is very ugly (2 trace facilities in parallel)
+ * - exceptions thrown are r_Error, either directly or through common
+ *   function generateException() (reladminif) which throws r_Ebase_dbms
+ *
+ ************************************************************/
+
+using namespace std;
+
+static const char rcsid[] = "@(#)blobif,BLOBTile: $Id: blobtile.ec,v 1.8 2003/12/27 23:19:03 rasdev Exp $";
+
+#include <stdio.h>
+#include <stdlib.h>             /* atoi */
+#include <set>
+
+// PG stuff:
+#include "libpq-fe.h"       /* C interface to PgSQL */
+#include "libpq/libpq-fs.h" /* large object (lo) api */
+
+// simple trace facility
+// trace macros are activated through externally defined compile variable DEBUG
+#include "debug-srv.hh"
+
+// general embedded SQL related definitions
+EXEC SQL include "../reladminif/sqlglobals.h";
+
+// libpg connection maintenance
+// must have been initiated before use (see databasif.pgc)
+extern PGconn *pgConn;
+
+// all the DBMS independent code is factored out and
+// will be included in the resulting .c file
+//#include "blobtile.cc"
+#include "blobtile.hh"
+#include "raslib/rmdebug.hh"
+#include "reladminif/objectbroker.hh"
+#include "reladminif/dbref.hh"
+#include "reladminif/sqlerror.hh"
+#include "inlinetile.hh"
+#include "tilecache.hh"
+
+#include <logging.hh>
+
+using namespace std;
+
+// update blob in ras_tiles table, identified by variable myOId (from blobtile.cc), update map ref
+void
+BLOBTile::updateInDb()
+{
+#ifdef NOTYET   // should be in future
+    /*
+        EXEC SQL BEGIN DECLARE SECTION;
+            Oid tile;
+            long    indbmyoId;
+            long    indbmyoid = 0;
+            short   dataformat = 0;
+        EXEC SQL END DECLARE SECTION;
+
+        dataformat = dataFormat;
+        indbmyoid = myOId.getCounter();
+
+        // (1) --- get tuple
+        LDEBUG << "EXEC SQL SELECT Tile INTO :tile FROM RAS_TILES WHERE BlobId = " << indbmyoid;
+        EXEC SQL SELECT TILE
+            INTO :tile
+            FROM RAS_TILES
+            WHERE BlobId = :indbmyoid;
+        if (SQLCODE < 0)
+        {
+            LERROR << "BLOBTile::updateInDb(): error: cannot get blob, SQLCODE " << SQLCODE;
+            check("Select blob oid");
+            generateException();
+        }
+        else if (SQLCODE == SQLNODATAFOUND)
+        {
+            LFATAL << "BLOBTile::updateInDb(): error: object not in database";
+            throw r_Error(r_Error::r_Error_ObjectUnknown);
+        }
+    */
+#endif //NOTYET
+    // alternative solution for now:
+    Oid tile;
+    long    indbmyoId = 0;
+    long    indbmyoid = 0;
+    short   dataformat = 0;
+    char pgQuery[SQL_QUERY_BUFFER_SIZE];
+    PGresult *pgResult = NULL;
+
+    // (1) --- get tuple
+    dataformat = dataFormat;
+    indbmyoid = myOId.getCounter();
+
+    (void) snprintf( pgQuery, sizeof(pgQuery), "SELECT Tile FROM RAS_TILES WHERE BlobId = %ld", indbmyoid );
+    LDEBUG << pgQuery;
+    pgResult = PQexec( pgConn, pgQuery );
+    if (PQresultStatus(pgResult) != PGRES_TUPLES_OK)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    else if (PQntuples(pgResult) != 1)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    tile = static_cast<Oid>(atoi( PQgetvalue( pgResult, 0, 0 ) ));    // extract value from result
+    PQclear( pgResult );
+
+
+    if (TileCache::cacheLimit > 0)
+    {
+        CacheValue* value = new CacheValue( cells, size, true, myOId, tile, this );
+        TileCache::insert( myOId, value );
+    }
+    else
+    {
+        // (2) --- open, write, close blob
+        LDEBUG << "lo_open()";
+        int fd = lo_open( pgConn, tile, INV_WRITE );    // no error code mentioned in manual
+        LDEBUG << "lo_write() for fd " << fd << " and " << size << " bytes";
+        int loResult = lo_write( pgConn, fd, cells, size );
+        if (loResult < 0)
+        {
+            LFATAL << "BLOBTile::updateInDb() cannot write blob, error: " << loResult;
+            generateException();
+        }
+        else if (loResult != static_cast<int>(size))          // did not get all
+        {
+            LTRACE << "BLOB (" << myOId << ") insert: wrote " << loResult << " instead of " << size << " bytes";
+            generateException();
+        }
+        LDEBUG << "lo_close()";
+        loResult = lo_close( pgConn, fd );
+        if (loResult < 0)               // can't close, don't know if data are written
+        {
+            LFATAL << "BLOBTile::updateInDb() ignoring lo_close() error: " << PQerrorMessage(pgConn);
+            generateException();
+        }
+    }
+
+#ifdef NOTYET   // should be in future
+    /*
+        // (3) --- update data format
+        // NOTE: we assume the blob already exists and do not change the oid
+        LDEBUG << "EXEC SQL UPDATE RAS_TILES SET DataFormat = " << dataformat << " WHERE BlobId = " << indbmyoid;
+        EXEC SQL UPDATE RAS_TILES
+            SET DataFormat = :dataformat
+            WHERE BlobId = :indbmyoid;
+        if (check("Update Dataformat"))
+            generateException();
+    */
+#endif //NOTYET
+    // alternative solution for now:
+    (void) snprintf( pgQuery, sizeof(pgQuery), "UPDATE RAS_TILES SET DataFormat = %d WHERE BlobId = %ld", dataformat, indbmyoid );
+    LDEBUG << pgQuery;
+    pgResult = PQexec( pgConn, pgQuery );
+    if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    PQclear( pgResult );
+
+    // (4) --- update map ref
+    DBObject::updateInDb();
+} // updateInDb()
+
+// insert new blob into ras_tiles table, update map ref
+// tuple is identified by blobtile.cc var myOId
+// data is taken from buffer 'cells' containing 'size' bytes
+void
+BLOBTile::insertInDb()
+{
+    /*
+    #ifdef NOTYET
+        EXEC SQL BEGIN DECLARE SECTION;
+    #endif NOTYET
+    */
+    Oid blobOid;
+    long    indbmyOId2;
+    short   dataformat2;
+    Oid     tile2;
+    /*
+    #ifdef NOTYET
+        EXEC SQL END DECLARE SECTION;
+    #endif NOTYET
+    */
+    dataformat2 = dataFormat;
+
+    // prelim:
+    char pgQuery[SQL_QUERY_BUFFER_SIZE];
+    PGresult *pgResult = NULL;
+
+    indbmyOId2 = myOId.getCounter();
+    LDEBUG << "myOId.getCounter = " << indbmyOId2;
+    
+    // (1) --- open, write, close blob; generates new 'oid' for subsequent storage in tuple
+    LDEBUG << "lo_creat()";
+    blobOid = lo_creat( pgConn, INV_READ|INV_WRITE );   // create -- not clear what INV_* here means so indicate all
+    if (blobOid == 0)
+    {
+        LFATAL << "BLOBTile::insertInDb() cannot create blob, error: " << PQerrorMessage(pgConn);
+        generateException();
+    }
+    
+    LDEBUG << "lo_open() for oid " << blobOid;
+    int fd = lo_open( pgConn, blobOid, INV_WRITE );     // no error code indicated, 0 seems to be no error
+    LDEBUG << "lo_write() for fd " << fd << " and " << size << " bytes";
+    int loResult = lo_write( pgConn, fd, cells, size );
+    if (loResult < 0)
+    {
+        LFATAL << "BLOBTile::insertInDb() cannot write blob, error: " << PQerrorMessage(pgConn);
+        generateException();
+    }
+    else if (loResult != static_cast<int>(size))          // did not get all
+    {
+        LDEBUG << "BLOB (" << myOId << ") insert: wrote " << loResult << " instead of " << size << " bytes";
+        generateException();
+    }
+    LDEBUG << "lo_close()";
+    loResult = lo_close( pgConn, fd );
+    if (loResult < 0)               // cannot close, don't know if data are there
+    {
+        LFATAL << "BLOBTile::insertInDb() ignoring lo_close() error: " << PQerrorMessage(pgConn);
+        generateException();
+    }
+
+    /*
+    #ifdef NOTYET
+        // (2) --- insert tuple into db
+        LDEBUG << "EXEC SQL INSERT INTO RAS_TILES ( BlobId, DataFormat, Tile ) VALUES (" << indbmyOId2 << "," << dataformat2 << ", " << blobOid << ")";
+        EXEC SQL INSERT INTO RAS_TILES ( BlobId, DataFormat, Tile)
+            VALUES  ( :indbmyOId2, :dataformat2, :blobOid );
+    #endif NOTYET
+    */
+    // alternative solution for now:
+    // (2) --- insert tuple into db
+    (void) snprintf( pgQuery, sizeof(pgQuery), "INSERT INTO RAS_TILES ( BlobId, DataFormat, Tile) VALUES  ( %ld, %d, %d )", indbmyOId2, dataformat2, blobOid );
+    LDEBUG << pgQuery;
+    pgResult = PQexec( pgConn, pgQuery );
+    if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    PQclear( pgResult );
+
+    // FIXME: other sources have here an updateInDb();
+
+    // (3) --- update map ref
+    DBObject::insertInDb();
+
+    if (TileCache::cacheLimit > 0)
+    {
+        CacheValue* value = new CacheValue( cells, size, true, myOId, blobOid, this );
+        TileCache::insert( myOId, value );
+    }
+} // insertInDb()
+
+// delete one tuple from ras_tiles table, update map ref
+// tuple is identified by blobtile.cc var myOId
+void
+BLOBTile::deleteFromDb()
+{
+    /*
+    #ifdef NOTYET
+        EXEC SQL BEGIN DECLARE SECTION;
+    #endif NOTYET
+    */
+    long blobId;    // blob tuple primary key
+    Oid blobOid;    // blob oid "ptr"
+    /*
+    #ifdef NOTYET
+        EXEC SQL END DECLARE SECTION;
+    #endif NOTYET
+    */
+
+    // get counter value (primary key) from oid
+    blobId = myOId.getCounter();
+
+    /*
+    #ifdef NOTYET
+        // (1) --- get tile tuple
+        LDEBUG << "EXEC SQL SELECT Tile INTO :blobOid FROM RAS_TILES WHERE BlobId = " << blobId;
+        EXEC SQL SELECT Tile INTO :blobOid FROM RAS_TILES WHERE BlobId = :blobId;
+        if (SQLCODE < 0)
+        {
+            check("BLOBTile::deleteFromDb() - find tuple\0");
+            generateException();
+        }
+    #endif NOTYET
+    */
+    char pgQuery[SQL_QUERY_BUFFER_SIZE];
+    (void) snprintf( pgQuery, sizeof(pgQuery), "SELECT Tile FROM RAS_TILES WHERE BlobId = %ld", blobId );
+    LDEBUG << pgQuery;
+    PGresult *pgResult = PQexec( pgConn, pgQuery );
+    if (PQresultStatus(pgResult) != PGRES_TUPLES_OK)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    else if (PQntuples(pgResult) != 1)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    blobOid = static_cast<Oid>(atoi( PQgetvalue( pgResult, 0, 0 ) )); // extract value from result
+    PQclear( pgResult );
+
+    // FIXME: other sources have here an updateInDb();
+
+    // (2) --- delete blob identified by blobOid
+    LDEBUG << "lo_unlink()";
+    int loResult = lo_unlink( pgConn, blobOid );
+    if (loResult < 0)
+    {
+        generateException();
+    }
+    
+    // remove from cache if necessary
+    if (TileCache::cacheLimit > 0)
+    {
+        TileCache::removeKey(myOId);
+    }
+
+    /*
+    #ifdef NOTYET
+        // (3) --- delete tuple from table
+        LDEBUG << "EXEC SQL DELETE FROM RAS_TILES WHERE BlobId = " << blobId;
+        EXEC SQL DELETE FROM RAS_TILES WHERE BlobId = :blobId;
+        if (SQLCODE < 0)
+        {
+            check("BLOBTile::deleteFromDb() - delete tuple\0");
+            generateException();
+        }
+    #endif NOTYET
+    */
+    (void) snprintf( pgQuery, sizeof(pgQuery), "DELETE FROM RAS_TILES WHERE BlobId = %ld", blobId );
+    LDEBUG << pgQuery;
+    pgResult = PQexec( pgConn, pgQuery );
+    if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    PQclear( pgResult );
+
+    // FIXME: other sources have here an updateInDb();
+
+    // update map ref
+    DBObject::deleteFromDb();
+}
+
+// delete a range of tuple(s) from ras_tiles table, update map ref
+// tuples are identified by target and a range
+void
+BLOBTile::kill(const OId& target, unsigned int range)
+{
+    /*
+    #ifdef NOTYET
+        EXEC SQL BEGIN DECLARE SECTION;
+    #endif NOTYET
+    */
+    long indbmyOId5;
+    long indbmyOId6;
+    long blobId;    // blob tuple primary key
+    Oid blobOid;    // blob oid "ptr"
+    /*
+    #ifdef NOTYET
+        EXEC SQL END DECLARE SECTION;
+    #endif NOTYET
+    */
+    char pgQuery[SQL_QUERY_BUFFER_SIZE];
+    PGresult *pgResult = NULL;  // query result
+
+    DBObject* targetobj = NULL;
+
+    if (range == 0)     // single tuple
+    {
+        // (1) --- delete form cache
+        targetobj = ObjectBroker::isInMemory(target);
+        if (targetobj)
+        {
+            targetobj->setPersistent(false);
+        }
+
+        // (2) --- free blob
+        indbmyOId5 = target.getCounter();
+        /*
+        #ifdef NOTYET
+                LDEBUG << "EXEC SQL SELECT Tile INTO :blobOid FROM RAS_TILES WHERE BlobId = " << indbmyOId5;
+                EXEC SQL SELECT Tile INTO :blobOid FROM RAS_TILES WHERE BlobId = :indbmyOId5;
+                if (SQLCODE < 0)
+                {
+                    check("BLOBTile::kill() - find tuple\0");
+                    generateException();
+                }
+                else if (SQLCODE != SQLNODATAFOUND) // we've got a tuple
+                {
+                    // delete blob identified by blobOid
+                }
+                // else there is no tuple - this is inconsistent, but nothing to delete
+        #endif NOTYET
+        */
+        (void) snprintf( pgQuery, sizeof(pgQuery), "SELECT Tile FROM RAS_TILES WHERE BlobId = %ld", indbmyOId5 );
+        LDEBUG << pgQuery;
+        pgResult = PQexec( pgConn, pgQuery );
+        if (PQresultStatus(pgResult) != PGRES_TUPLES_OK)
+        {
+            PQclear( pgResult );
+            generateException();
+        }
+        else if (PQntuples(pgResult) != 1)
+        {
+            PQclear( pgResult );
+            return;
+        }
+        blobOid = static_cast<Oid>(atoi( PQgetvalue( pgResult, 0, 0 ) )); // extract value from result
+        PQclear( pgResult );
+
+        // delete blob identified by blobOid
+        int loResult = lo_unlink( pgConn, blobOid );
+        if (loResult < 0)
+        {
+            check("BLOBTile::kill() - unlink blob\0");
+            generateException();
+        }
+        
+        // remove from cache if necessary
+        if (TileCache::cacheLimit > 0)
+        {
+            TileCache::removeKey(indbmyOId5);
+        }
+
+        /*
+        #ifdef NOTYET
+                // (3) --- delete tuple
+                LDEBUG << "EXEC SQL DELETE FROM RAS_TILES WHERE BlobId = " << indbmyOId5;
+                EXEC SQL DELETE FROM RAS_TILES WHERE BlobId = :indbmyOId5;
+                if (SQLCODE != SQLOK)
+                {
+                    if (SQLCODE == SQLNODATAFOUND)  // was: NODATA -- PB 2005-feb-13
+                    {
+                        if (target.getType() == OId::INLINETILEOID)
+                        {
+                            InlineTileId t(target);
+                            if (!t.is_null())
+                                t->setPersistent(false);
+                        }
+                        //else: this tile has been deleted before
+                    }
+                    else
+                    {
+                        check("BLOBTile::kill()\0");
+                        generateException();
+                    }
+                }
+        #endif NOTYET
+        */
+        (void) snprintf( pgQuery, sizeof(pgQuery), "DELETE FROM RAS_TILES WHERE BlobId = %ld", indbmyOId5 );
+        LDEBUG << pgQuery;
+        pgResult = PQexec( pgConn, pgQuery );
+        if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
+        {
+            PQclear( pgResult );
+            generateException();
+        }
+        else if (PQntuples(pgResult) == 0)
+        {
+            if (target.getType() == OId::INLINETILEOID)
+            {
+                InlineTileId t(target);
+                if (!t.is_null())
+                    t->setPersistent(false);
+            }
+            //else: this tile has been deleted before
+        }
+        PQclear( pgResult );
+    }
+    else
+    {
+        // (1) --- iterate over cache and remove
+        DBObjectPMap& mapRef = ObjectBroker::getMap(target.getType());
+        DBObjectPMap::iterator it = mapRef.begin();
+        DBObjectPMap::iterator theEnd = mapRef.end();
+        OId end(target.getCounter() + range, target.getType());
+        while (it != theEnd)
+        {
+            if (target <= static_cast<const OId&>((*it).first) && (*it).first <= static_cast<const OId&>(end))
+            {
+                (*it).second->setPersistent(false);
+            }
+        }
+
+        // (2) --- iterate over db and remove
+        /*
+        #ifdef NOTYET
+                LDEBUG << "EXEC SQL DECLARE DeleteLoop CURSOR FOR SELECT Tile FROM RAS_TILES WHERE " << indbmyOId5 << " <= BlobId AND BlobId <= " << indbmyOId6;
+                EXEC SQL DECLARE DeleteLoop CURSOR FOR SELECT Tile FROM RAS_TILES WHERE :indbmyOId5 <= BlobId AND BlobId <= :indbmyOId6;
+                if (SQLCODE < 0)
+                {
+                    check("BLOBTile::kill() - prepare cursor\0");
+                    generateException();
+                }
+        #endif NOTYET
+        */
+        (void) snprintf( pgQuery, sizeof(pgQuery), "DECLARE DeleteLoop CURSOR FOR SELECT Tile FROM RAS_TILES WHERE %ld <= BlobId AND BlobId <= %ld", indbmyOId5, indbmyOId6 );
+        LDEBUG << pgQuery;
+        pgResult = PQexec( pgConn, pgQuery );
+        if (PQresultStatus(pgResult) != PGRES_TUPLES_OK)
+        {
+            PQclear( pgResult );
+            generateException();
+        }
+
+        // loop over elements & delete each one
+        do
+        {
+            /*
+            #ifdef NOTYET
+                        LDEBUG << "EXEC SQL FETCH NEXT FROM DeleteLoop INTO :blobOid";
+                        EXEC SQL FETCH NEXT FROM DeleteLoop INTO :blobOid;
+                        if (SQLCODE < 0)
+                        {
+                            check("BLOBTile::kill() - fetch next tuple\0");
+                            generateException();
+                        }
+            #endif NOTYET
+            */
+            (void) snprintf( pgQuery, sizeof(pgQuery), "FETCH NEXT FROM DeleteLoop" );
+            LDEBUG << pgQuery;
+            pgResult = PQexec( pgConn, pgQuery );
+            if (PQresultStatus(pgResult) != PGRES_TUPLES_OK)
+            {
+                PQclear( pgResult );
+                generateException();
+            }
+            else if (PQntuples(pgResult) != 1)
+            {
+                PQclear( pgResult );
+                generateException();
+            }
+            blobOid = static_cast<Oid>(atoi( PQgetvalue( pgResult, 0, 0 ) )); // extract value from result
+
+            OId tmpOid(blobOid);
+
+            // delete blob identified by blobOid
+            int loResult = lo_unlink( pgConn, blobOid );
+            if (loResult < 0)
+            {
+                check("BLOBTile::kill() - unlink blob\0");
+                generateException();
+            }
+        
+            // remove from cache if necessary
+            if (TileCache::cacheLimit > 0)
+            {
+                TileCache::removeKey(tmpOid);
+            }
+            /*
+            #ifdef NOTYET
+                    } while (SQLCODE == SQLOK || SQLCODE < 0);
+            #endif NOTYET
+            */
+            // FIXME: what about errors? continue??
+        }
+        while (PQresultStatus(pgResult) != PGRES_TUPLES_OK);
+        PQclear( pgResult );
+
+        // (3) --- delete tuples in db
+        indbmyOId5 = target.getCounter();
+        indbmyOId6 = end.getCounter();
+        /*
+        #ifdef NOTYET
+                LDEBUG << "EXEC SQL DELETE FROM RAS_TILES WHERE " << indbmyOId5 << " <= BlobId AND BlobId <= " << indbmyOId6;
+                EXEC SQL DELETE FROM RAS_TILES WHERE :indbmyOId5 <= BlobId AND BlobId <= :indbmyOId6;
+                if ((SQLCODE != SQLOK) && (SQLCODE != SQLNODATAFOUND))
+                {
+                    check("BLOBTile::kill()\0");
+                    generateException();
+                }
+        #endif NOTYET
+        */
+        (void) snprintf( pgQuery, sizeof(pgQuery), "DELETE FROM RAS_TILES WHERE %ld <= BlobId AND BlobId <= %ld", indbmyOId5, indbmyOId6 );
+        LDEBUG << pgQuery;
+        pgResult = PQexec( pgConn, pgQuery );
+        if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
+        {
+            PQclear( pgResult );
+            generateException();
+        }
+        PQclear( pgResult );
+
+    }
+}
+
+// read tuple from ras_tiles, identified by blobtile.cc var myOId
+// allocates necessary mem into ptr 'cells' and fills it; must be freed elsewhere
+// external var 'size' is set to the number of bytes read
+void
+BLOBTile::readFromDb()
+{
+#ifdef RMANBENCHMARK
+    DBObject::readTimer.resume();
+#endif
+
+    /*
+    #ifdef NOTYET
+        EXEC SQL BEGIN DECLARE SECTION;
+    #endif NOTYET
+    */
+    Oid blobOid;
+    long    indbmyOId3;
+    short   dataformat3;
+    short   indicatorr3;
+    /*
+    #ifdef NOTYET
+        EXEC SQL END DECLARE SECTION;
+    #endif NOTYET
+    */
+    PGresult *pgResult = NULL;          // PostgreSQL call return values
+
+    indbmyOId3 = myOId.getCounter();
+
+    // (1) --- access tuple
+    /*
+    #ifdef NOTYET
+        LDEBUG << "EXEC SQL SELECT Tile, DataFormat INTO :blobOid, :dataformat3 FROM RAS_TILES WHERE BlobId = " << indbmyOId3;
+        EXEC SQL SELECT Tile, DataFormat INTO :blobOid, :dataformat3 FROM RAS_TILES WHERE BlobId = :indbmyOId3;
+        if (SQLCODE < 0)
+        {
+            LFATAL << "BLOBTile::readFromDb() Fatal error during RAS_TILES read: got SQLCODE " << SQLCODE << " for oid " << indbmyOId3;
+            check("BLOBTile::readFromDb() - find tuple\0");
+            generateException();
+        }
+        else if (SQLCODE == SQLNODATAFOUND) // we've got no tuple
+        {
+            LFATAL << "BLOBTile::readFromDb() error: object unknown for oid " << indbmyOId3;
+            throw r_Error(r_Error::r_Error_ObjectUnknown);
+        }
+    #endif NOTYET
+    */
+    char pgQuery[SQL_QUERY_BUFFER_SIZE];
+    (void) snprintf( pgQuery, sizeof(pgQuery), "SELECT Tile, DataFormat FROM RAS_TILES WHERE BlobId = %ld", indbmyOId3 );
+    LDEBUG << pgQuery;
+    pgResult = PQexec( pgConn, pgQuery );
+    if (PQresultStatus(pgResult) != PGRES_TUPLES_OK)
+    {
+        PQclear( pgResult );
+        generateException();
+    }
+    else if (PQntuples(pgResult) != 1)
+    {
+        PQclear( pgResult );
+        throw r_Error(r_Error::r_Error_ObjectUnknown);
+    }
+    blobOid     = static_cast<Oid>(atoi( PQgetvalue( pgResult, 0, 0 ) )); // extract 1st value from result
+    dataformat3 = atoi( PQgetvalue( pgResult, 0, 1 ) ); // extract 2nd value from result
+    PQclear( pgResult );
+
+    // we have a tuple, extract data format
+    dataFormat = static_cast<r_Data_Format>(dataformat3);
+    currentFormat = static_cast<r_Data_Format>(dataformat3);
+    LDEBUG << "got dataFormat " << dataFormat;
+    
+    if (TileCache::cacheLimit > 0 && TileCache::contains( myOId ))
+    {
+        CacheValue* cached = TileCache::get( myOId );
+        if (size == 0)
+        {
+            size = cached->getSize();
+        }
+        cells = cached->getData();
+        cached->addReferencingTile(this);
+        
+        LDEBUG <<"BLOBTile::readFromDb() - data cached, copying cells: " << (void*)cached->getData() << ", to new cells: " << (void*)cells;
+    }
+    else
+    {
+        // (2) --- open, read, close blob
+        LDEBUG << "lo_open()";
+        int fd = lo_open( pgConn, blobOid, INV_READ );      // open; manual tells no error indication
+        if (fd < 0)
+        {
+            LFATAL << "BLOBTile::readFromDb() error: cannot open BLOB with oid " << blobOid << ", error: " << PQerrorMessage(pgConn);
+            generateException();
+        }
+        LDEBUG << "lo_lseek() end";
+        size = static_cast<r_Bytes>(lo_lseek( pgConn, fd, 0, SEEK_END ));     // determine blob size; FIXME: more efficient method??
+        if (size <= 0)
+        {
+            LFATAL << "BLOBTile::readFromDb() error: invalid BLOB size " << size << " for BLOB oid " << blobOid;
+            generateException();
+        }
+        LDEBUG << "lo_lseek() start";
+        (void) lo_lseek( pgConn, fd, 0, SEEK_SET );     // rewind for reading
+        cells = static_cast<char*>(mymalloc( size * sizeof(char) ));    // allocate buffer for blob
+        if (cells == NULL)
+        {
+            LFATAL << "BLOBTile::readFromDb() error: cannot allocate " << size << " bytes ";
+            generateException();
+        }
+
+        LDEBUG << "lo_read()";                    // read blob
+        int loResult = lo_read( pgConn, fd, cells, size );
+        if (loResult <= 0)
+        {
+            LFATAL << "BLOBTile::readFromDb() cannot read blob with oid " << blobOid << ", error: " << PQerrorMessage(pgConn);
+            generateException();
+        }
+        else if (loResult != static_cast<int>(size))              // did not get all
+        {
+            LDEBUG << "BLOB (" << myOId << ") read: want to read (" << size << " bytes, but got " << loResult << " bytes";
+            generateException();
+        }
+        LDEBUG << "lo_close()";
+        int ignoredPgResult = lo_close( pgConn, fd );       // close blob
+        if (ignoredPgResult < 0)                // we note, but ignore errors, as we have the data
+        {
+            LERROR << "BLOBTile::readFromDb() ignoring lo_close() error: " << PQerrorMessage(pgConn);
+        }
+        
+        if (TileCache::cacheLimit > 0)
+        {
+            CacheValue* value = new CacheValue( cells, size, false, myOId, blobOid, this, dataFormat );
+            TileCache::insert( myOId, value );
+        }
+    }
+    RMDBGIF(20, RMDebug::module_blobif, "BLOBTileOutput", for (int a = 0; a < size; a++)\
+            RMInit::dbgOut << " " << hex << (int)(cells[a]); RMInit::dbgOut << dec;)
+
+        DBObject::readFromDb();
+
+#ifdef RMANBENCHMARK
+    DBObject::readTimer.pause();
+#endif
+}
+
+
+void BLOBTile::writeCachedToDb(CacheValue* value)
+{
+    if (value && value->isUpdate())
+    {
+        Oid blobOid;
+        r_Bytes size = value->getSize();
+        char* cells = value->getData();
+        OId myOId = value->getOId();
+        
+        blobOid = value->getBlobOid();
+        
+        LDEBUG << "lo_open() for oid " << blobOid;
+        int fd = lo_open( pgConn, blobOid, INV_WRITE );     // no error code indicated, 0 seems to be no error
+        LDEBUG << "lo_write() for fd " << fd << " and " << size << " bytes";
+        int loResult = lo_write( pgConn, fd, cells, size );
+        if (loResult < 0)
+        {
+            LFATAL << "BLOBTile::insertInDb() cannot write blob, error: " << PQerrorMessage(pgConn);
+            generateException();
+        }
+        else if (loResult != static_cast<int>(size))          // did not get all
+        {
+            LTRACE << "BLOB (" << myOId << ") insert: wrote " << loResult << " instead of " << size << " bytes";
+            generateException();
+        }
+        LDEBUG << "lo_close()";
+        loResult = lo_close( pgConn, fd );
+        if (loResult < 0)               // cannot close, don't know if data are there
+        {
+            LFATAL << "BLOBTile::insertInDb() ignoring lo_close() error: " << PQerrorMessage(pgConn);
+            generateException();
+        }
+    }
+    
+    delete value;
+}
+
+long long
+BLOBTile::getAnyTileOid()
+{
+    return NO_TILE_FOUND;
+}
+

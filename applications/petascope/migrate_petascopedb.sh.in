@@ -1,0 +1,89 @@
+#!/bin/bash
+#
+# This file is part of rasdaman community.
+#
+# Rasdaman community is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Rasdaman community is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright 2003 - 2017 Peter Baumann /
+# rasdaman GmbH.
+#
+# For more information please see <http://www.rasdaman.org>
+# or contact Peter Baumann via <baumann@rasdaman.com>.
+#
+# ------------------------------------------------------------------------------
+#
+# SYNOPSIS
+#    migrate_petascopedb.sh
+# Description
+#    This script is used to migrate coverages imported by wcst_import, OWS Service 
+#    metadata and WMS 1.3 layers. For more details see
+#    http://rasdaman.org/wiki/PetascopeUserGuide#Databasemigration
+#
+#    There are 2 types of migration:
+#     1. Migrate petascopedb 9.4 or older. After the migration, the old 
+#        petascopedb is backed up at petascope_94_backup.    
+#     2. Migrate petascopedb 9.5 or newer to a different database name or 
+#        different database (e.g. PostgreSQL to HSQLDB).
+#
+# Preconditions
+#    - The petascope web application must not be running (e.g: in Tomcat) while 
+#      migrating to a different database (type 2 above) to protect the existing 
+#      data integrity.
+
+readonly MYNAME=$(basename $0)
+
+readonly RC_OK=0
+readonly RC_ERROR=1
+
+log() {
+    echo "$MYNAME: $@"
+}
+
+error() {
+    echo "$MYNAME: $@" 1>&2
+    echo "$MYNAME: Exiting." 1>&2
+    exit $RC_ERROR
+}
+
+readonly LOG_FILE="@LOG_DIR@/petascope-migration.log"
+readonly PROPERTIES_FILE="@CONF_DIR@/petascope.properties"
+
+# This jar file is generated from the petascope_migration application
+readonly PETASCOPE_WAR="@WAR_DIR@/rasdaman.war"
+if [ ! -f "$PETASCOPE_WAR" ]; then
+    error "Cannot find the migration application '$PETASCOPE_WAR'."
+fi
+
+log "Using configuration file '$PROPERTIES_FILE'."
+
+read -p "$MYNAME: Start the migration process [Y/n]? " -n 1 -r
+echo -e ""
+if [[ $REPLY =~ ^[Yy]$ ]] || [[ "$REPLY" = "" ]]; then
+    # User can see the log from the terminal at the same time as migration application writes to petascope.log
+    # Filter log4j/grpc log to user's console
+    java -jar "$PETASCOPE_WAR" --migrate 2>&1 |  grep -v --line-buffered -e 'grpc' -e 'log4j'
+
+    # NOTE: $? always return 0 even when first command returns 1 (exception in migration application)
+    # so we have to get the exit code of the java -jar command from PIPESTATUS
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log "Migration completted successfully."
+    else
+        error "Migration failed."
+    fi
+else
+    log "Aborting, no data has been migrated."
+fi
+
+log "Done."
+exit $RC_OK

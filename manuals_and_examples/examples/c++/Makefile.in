@@ -1,0 +1,93 @@
+# -*-Makefile-*-
+# This file is part of rasdaman community.
+#
+# Rasdaman community is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Rasdaman community is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright 2003, 2004, 2005, 2006, 2007, 2008, 2009 Peter Baumann /
+# rasdaman GmbH.
+#
+# For more information please see <http://www.rasdaman.org>
+# or contact Peter Baumann via <baumann@rasdaman.com>.
+#
+# MAKEFILE FOR:
+#   query
+#
+#
+# COMMENTS:
+#
+##################################################################
+
+COMPILER = g++
+LINKER   = g++
+FLAGS    = -fPIC -pthread -std=c++11 -fno-stack-protector -fno-strict-overflow -O3 -g0
+
+INCS = -I @CMAKE_INSTALL_PREFIX@/include       \
+       -I @CMAKE_INSTALL_PREFIX@/include/debug \
+       -I @CMAKE_INSTALL_PREFIX@/include/raslib\
+       -I /usr/include/jsoncpp/
+
+LIBS = -L@CMAKE_INSTALL_PREFIX@/lib \
+       -lrasodmg               \
+       -lclientcomm            \
+       -lraslib                \
+       -lconversion            \
+       -lcommline              \
+       -lnetwork               \
+       -lrasnet                \
+       -lcommon_crypto         \
+       -lcommon_grpc           \
+       -lcommon_file           \
+       -lcommon_exceptions     \
+       -lcommon_network        \
+       -lcommon_logging        \
+       -lcommon_time           \
+       -lcommon_uuid           \
+       -leasyloggingpp         \
+       -lmymalloc_cln          \
+       -lmymalloc_svc          \
+       -lgrpc++_unsecure       \
+       -lgrpc_unsecure         \
+       -lz                     \
+       -lprotobuf              \
+       -lpthread               \
+       -lboost_thread          \
+       -lboost_system          \
+       -lpgtypes               \
+       -lpq                    \
+       -lnetcdf_c++            \
+       -lnetcdf                \
+       -ltiff                  \
+       -ledit                  \
+       -lfl                    \
+       -ldl                    \
+       -lcrypto                \
+       -lcrypt
+
+DEFS = -DEARLY_TEMPLATE
+
+
+all: bin
+
+
+query.o: query.cc
+	$(COMPILER) $(FLAGS) $(DEFS) $(INCS) -c query.cc
+
+
+bin: query.o
+	$(LINKER) $(FLAGS) -o query query.o $(LIBS)
+
+
+clean:
+	-rm -f *.o
+	-rm -f $(EXEC_FILE)

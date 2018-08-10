@@ -1,0 +1,5 @@
+build/
+^.*\.Rproj$
+^\.Rproj\.user$
+RRasdaman.Rcheck
+Makefile*

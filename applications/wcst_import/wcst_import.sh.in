@@ -1,0 +1,63 @@
+#!/bin/bash
+# *
+# * This file is part of rasdaman community.
+# *
+# * Rasdaman community is free software: you can redistribute it and/or modify
+# * it under the terms of the GNU General Public License as published by
+# * the Free Software Foundation, either version 3 of the License, or
+# * (at your option) any later version.
+# *
+# * Rasdaman community is distributed in the hope that it will be useful,
+# * but WITHOUT ANY WARRANTY; without even the implied warranty of
+# * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# * See the GNU  General Public License for more details.
+# *
+# * You should have received a copy of the GNU  General Public License
+# * along with rasdaman community.  If not, see <http://www.gnu.org/licenses/>.
+# *
+# * Copyright 2003 - 2015 Peter Baumann / rasdaman GmbH.
+# *
+# * For more information please see <http://www.rasdaman.org>
+# * or contact Peter Baumann via <baumann@rasdaman.com>.
+# *
+#
+# Call the wcst_import.py from the share directory
+export PETASCOPE_PROPERTIES_PATH="@CONF_DIR@/petascope.properties"
+
+RC_OK=0
+
+usage()
+{
+  local -r usage="
+Usage: $PROG [OPTION] <ingredients_file>
+
+wcst_import.sh is a tool for importing data into petascope via WCS-T (example: http://rasdaman.org/wiki/WCSTImportGuide).
+
+Options:
+  -q, --quiet
+    suppress regular output
+  -h, --help
+    display this help and exit
+"
+  echo "$usage"
+  exit $RC_OK
+}
+
+# ----------------------------------------------------------------------------
+# parse command-line options
+# ----------------------------------------------------------------------------
+quiet=false 
+for i in "$@"; do
+    case $i in
+      -h|--help)     usage;;
+      -q|--quiet)   quiet=true;;
+      *) ingredients_file="$i";;
+    esac
+done
+
+if [[ "$quiet" == true ]]; then
+    # Ignore stdout, redirect stderr to stdout when log level > INFO in wcst_import/.../log.py
+    python @WCST_IMPORT_PY_SCRIPT@ "$ingredients_file" 2>&1 > /dev/null
+else
+    python @WCST_IMPORT_PY_SCRIPT@ "$ingredients_file"
+fi
