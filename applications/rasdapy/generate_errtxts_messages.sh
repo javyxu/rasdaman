@@ -47,6 +47,11 @@ RC_ERROR=1
 # Input file (errtxts)
 ERRTXTS_FILE="$SCRIPT_DIR/../bin/errtxts"
 
+if [ ! -f "$ERRTXTS_FILE" ]; then
+    SCRIPT_DIR_T="$( cd -P "$( dirname "$SCRIPT_DIR" )" && pwd )"
+    ERRTXTS_FILE="$SCRIPT_DIR_T/../bin/errtxts"
+fi
+
 # Output template file (e.g: rasj: RasErrorTexts.java.in file)
 TEMPLATE_FILE="$1"
 
