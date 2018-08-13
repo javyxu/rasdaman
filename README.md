@@ -10,9 +10,90 @@
 
 **新一代地理栅格服务器** ：从简单的地理图像服务到复杂的分析，rasdaman提供了时空光栅数据的所有功能——包括规则网格和不规则网格。正如最近的科学基准所显示的那样，它的性能和可扩展性是前所未有的。为了利用这种支持技术，用户不必学习新的接口:rasdaman与R、OpenLayers、Leaflet、NASA WorldWind、GDAL、MapServer、ESRI ArcGIS等软件进行了平滑集成，想要了解更多可点击[这里](http://rasdaman.org/wiki/Clients)。
 
-更多关于rasdaman，请点击**[这里](http://rasdaman.org/)**
+更多关于rasdaman，请点击[这里](http://rasdaman.org/)。
 
 ### 安装
+
+#### 创建rasdaman用户
+
+```
+yum install epel-release
+adduser rasdaman
+passwd rasdaman
+
+# 切换到rasdaman用户
+sudo -u rasdaman -i
+```
+
+**注：**  修改/etc/sudoers
+
+##### 修改sudoers方法
+
+```
+vi /etc/sudoers
+
+## 方法一： 把前面的注释（#）去掉
+## Allows people in group wheel to run all commands
+%wheel    ALL=(ALL)    ALL
+
+## 然后修改用户，使其属于root组（wheel），命令如下：
+
+#usermod -g root tommy
+
+
+## 方法二：在root下面添加一行，如下所示：
+
+## Allow root to run any commands anywhere
+root    ALL=(ALL)     ALL
+rasdaman   ALL=(ALL)     ALL
+```
+
+#### 需要包的说明和安装
+
+```
+sudo yum install \
+  git make libtool pkgconfig m4 unzip curl \
+  bison gcc gcc-c++ libedit-devel zlib-devel openssl-devel \
+  flex flex-devel boost-devel libstdc++-static \
+  gdal-devel hdf-devel netcdf-devel grib_api-devel netcdf-cxx-devel netcdf4-python \
+  postgresql-devel postgresql-contrib postgresql-server sqlite-devel \
+  gdal-python gdal-java python-setuptools python-pip python-magic python2-netcdf4 grib_api\
+  java-1.8.0-openjdk java-1.8.0-openjdk-devel java-1.8.0-openjdk-headless tomcat maven2 \
+  libgeotiff libgeotiff-devel libtiff libtiff-devel \
+  doxygen
+sudo yum install cmake3
+sudo pip install glob2
+```
+
+**注**：源码编译安装boost,安装过程请参考[boost1.67](https://blog.csdn.net/xzwspy/article/details/81603227)，
+
+#### 配置条件
+
+1. 确保java和javac版本一致
+
+  ```
+  java -version
+  javac -version
+  ```
+
+2. 允许用户添加部署tomcat webapps目录
+
+  ```
+  sudo adduser $USER tomcat
+  # reboot or logout/login is necessary for this command to take effect
+  ```
+
+3. 如果支持PostgresSQL，请添加postgres用户：
+
+  ```
+  sudo -u postgres createuser -s $USER
+  ```
+
+4.  如果使用tomcat，请设置tomacat最大heap空间>=1GB。设置方式如下：
+
+  修改etc/default/tomcat7的JAVA_OPTS=Xmx1024m，然重启tomcat `sudo service tomcat restart.`。
+
+#### 获取源代码并安装
 
 1. 获取源代码
 
