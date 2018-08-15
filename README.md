@@ -91,7 +91,15 @@ sudo pip install glob2
 
 4.  如果使用tomcat，请设置tomacat最大heap空间>=1GB。设置方式如下：
 
-  修改etc/default/tomcat7的JAVA_OPTS=Xmx1024m，然重启tomcat `sudo service tomcat restart.`。
+  修改etc/default/tomcat7的JAVA_OPTS=Xmx1024m，然重启tomcat `sudo service tomcat restart.`。如果安装的是8.0之后的tomcat，请修改安装目录下的`bin/catalina.sh`下修改如下代码：
+
+  ```
+  if [ -z "$JSSE_OPTS" ] ; then
+  JSSE_OPTS="-Djdk.tls.ephemeralDHKeySize=2048"
+  fi
+  #JAVA_OPTS="$JAVA_OPTS $JSSE_OPTS"  #此处是注释
+  JAVA_OPTS="-Xms512m -Xmx1024m"  #此处是新增
+  ```
 
 #### 获取源代码并安装
 
